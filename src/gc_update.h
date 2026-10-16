@@ -14,6 +14,7 @@
 #include "websrv.h"
 
 /* GET /api/gc/update -> current state. */
+void gc_update_start(void);
 int gc_update_status_request(const http_request_t *req);
 /* POST /api/gc/update/check, POST /api/gc/update/install. */
 int gc_update_action_request(const http_request_t *req);

@@ -480,6 +480,23 @@ mkdir_p(char *path) {
 static uint32_t rd16(const unsigned char *p) { return p[0] | (p[1] << 8); }
 static uint32_t rd32(const unsigned char *p) { return rd16(p) | ((uint32_t)rd16(p + 2) << 16); }
 
+static int
+file_crc_matches(const char *path, uint32_t size, uint32_t crc) {
+  int fd = open(path, O_RDONLY);
+  if(fd < 0) return 0;
+  struct stat sb;
+  int ok = 0;
+  if(fstat(fd, &sb) == 0 && (uint64_t)sb.st_size == size) {
+    static __thread unsigned char buf[1 << 15];
+    uLong c = crc32(0, Z_NULL, 0);
+    ssize_t n;
+    while((n = read(fd, buf, sizeof(buf))) > 0) c = crc32(c, buf, (uInt)n);
+    ok = n == 0 && (uint32_t)c == crc;
+  }
+  close(fd);
+  return ok;
+}
+
 /* Extracts the release zip (PPSA99290/...) into <app_dir>. Each file is
  * written under a temporary name and renamed into place. Returns 0 on success. */
 static int
@@ -495,6 +512,7 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
   }
   close(fd);
   int rc = -1;
+  unsigned char *iobuf = NULL;
   long eocd = -1;
   for(long i = (long)size - 22; i >= 0 && i > (long)size - 70000; i--) {
     if(rd32(z + i) == 0x06054b50u) { eocd = i; break; }
@@ -502,7 +520,11 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
   if(eocd < 0) { snprintf(err, err_size, "the app zip is damaged"); goto done; }
   unsigned count = rd16(z + eocd + 10);
   uint32_t pos = rd32(z + eocd + 16);
-  static unsigned char iobuf[1 << 16];
+  iobuf = malloc(1 << 16);
+  if(!iobuf) { snprintf(err, err_size, "out of memory"); goto done; }
+  const uint32_t cd_start = pos;
+  for(int pass = 0; pass < 2; pass++) {
+  pos = cd_start;
   for(unsigned n = 0; n < count; n++) {
     if((int64_t)pos + 46 > size || rd32(z + pos) != 0x02014b50u) {
       snprintf(err, err_size, "the app zip is damaged"); goto done;
@@ -519,6 +541,9 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
     name[nlen] = 0;
     pos += 46 + nlen + elen + clen;
     if(strncmp(name, "PPSA99290/", 10) != 0 || strstr(name, "..") || name[nlen - 1] == '/') continue;
+    /* eboot.bin goes last: it is the file the running app keeps busy. */
+    int is_eboot = strcmp(name, "PPSA99290/eboot.bin") == 0;
+    if((pass == 1) != is_eboot) continue;
     if((int64_t)lho + 30 > size || rd32(z + lho) != 0x04034b50u) {
       snprintf(err, err_size, "the app zip is damaged"); goto done;
     }
@@ -530,6 +555,7 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
     snprintf(dest, sizeof(dest), "%s/%s", app_dir, name);
     snprintf(tmp, sizeof(tmp), "%s.new", dest);
     mkdir_p(dest);
+    if(file_crc_matches(dest, usize, crc)) continue; /* already up to date */
     int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if(out < 0) { snprintf(err, err_size, "cannot write %s: %s", dest, strerror(errno)); goto done; }
     uLong crc_now = crc32(0, Z_NULL, 0);
@@ -569,15 +595,106 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
       goto done;
     }
     if(rename(tmp, dest) != 0) {
-      snprintf(err, err_size, "cannot replace %s: %s", dest, strerror(errno));
-      unlink(tmp);
-      goto done;
+      int e = errno;
+      /* Some file systems refuse to replace a file in use: remove, then rename. */
+      if(!(unlink(dest) == 0 && rename(tmp, dest) == 0)) {
+        snprintf(err, err_size, "cannot replace %s: %s", dest, strerror(e));
+        unlink(tmp);
+        rc = 1; /* busy: the app is probably still running */
+        goto done;
+      }
     }
+  }
   }
   rc = 0;
 done:
+  free(iobuf);
   free(z);
   return rc;
+}
+
+#define PENDING_ZIP DATA_DIR "/pending-app.zip"
+
+/* Applies the zip to every app folder found. 0 ok, 1 busy (some file is in
+ * use), -1 failed. updated lists the folders; err the last problem. */
+static int
+apply_zip_everywhere(const char *zip_path, char *updated, size_t updated_size, char *err,
+                     size_t err_size) {
+  int copies = 0, rc = 0;
+  updated[0] = 0;
+  for(int i = 0; k_app_dirs[i]; i++) {
+    char probe[400];
+    struct stat ps;
+    snprintf(probe, sizeof(probe), "%s/PPSA99290/eboot.bin", k_app_dirs[i]);
+    if(stat(probe, &ps) != 0) continue;
+    char root[320];
+    snprintf(root, sizeof(root), "%s", k_app_dirs[i]);
+    int r = extract_app_zip(zip_path, root, err, err_size);
+    if(r == 0) {
+      copies++;
+      size_t len = strlen(updated);
+      snprintf(updated + len, updated_size - len, "%s%s/PPSA99290", len ? ", " : "", k_app_dirs[i]);
+      gc_log("update: app folder updated: %s", root);
+    } else {
+      rc = r;
+      break;
+    }
+  }
+  if(rc == 0 && copies == 0) {
+    snprintf(err, err_size, "no app folder found");
+    return -1;
+  }
+  return rc;
+}
+
+static pthread_mutex_t pending_lock = PTHREAD_MUTEX_INITIALIZER;
+static int pending_running;
+
+static void *
+pending_worker(void *arg) {
+  (void)arg;
+  for(int attempt = 0; attempt < 900; attempt++) { /* about an hour */
+    sleep(4);
+    if(access(PENDING_ZIP, F_OK) != 0) break;
+    char updated[300], err[240] = "";
+    int r = apply_zip_everywhere(PENDING_ZIP, updated, sizeof(updated), err, sizeof(err));
+    if(r == 1) continue; /* the app is still open */
+    if(r == 0) {
+      gc_log("update: pending app update applied: %s", updated);
+      pthread_mutex_lock(&st.mutex);
+      snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-updated");
+      snprintf(st.app_path, sizeof(st.app_path), "%s", updated);
+      pthread_mutex_unlock(&st.mutex);
+    } else {
+      gc_log("update: pending app update failed: %s", err);
+    }
+    unlink(PENDING_ZIP);
+    break;
+  }
+  pthread_mutex_lock(&pending_lock);
+  pending_running = 0;
+  pthread_mutex_unlock(&pending_lock);
+  return NULL;
+}
+
+static void
+pending_start(void) {
+  pthread_mutex_lock(&pending_lock);
+  if(!pending_running) {
+    pthread_t t;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if(pthread_create(&t, &attr, pending_worker, NULL) == 0) pending_running = 1;
+    pthread_attr_destroy(&attr);
+  }
+  pthread_mutex_unlock(&pending_lock);
+}
+
+/* Called when the payload starts: finish an app update left waiting. */
+void
+gc_update_start(void) {
+  if(access(PENDING_ZIP, F_OK) == 0) pending_start();
 }
 
 static int
@@ -695,28 +812,25 @@ do_install(void) {
     if(have_zip && free_space_ok(DATA_DIR, 80LL << 20) &&
        download_verified(tag, ZIP_FILE, zip_hash, zip_part, MAX_ZIP) == 0) {
       set_phase("installing");
-      /* Every copy of the app found (the mounted one may be on /data or on
-       * a USB drive): update them all so the one ShadowMount+ runs is hit. */
       char updated[300] = "";
-      int copies = 0;
-      zrc = 0;
-      for(int i = 0; k_app_dirs[i] && zrc == 0; i++) {
-        char probe[400];
-        struct stat ps;
-        snprintf(probe, sizeof(probe), "%s/PPSA99290/eboot.bin", k_app_dirs[i]);
-        if(stat(probe, &ps) != 0) continue;
-        char root[320];
-        snprintf(root, sizeof(root), "%s", k_app_dirs[i]);
-        zrc = extract_app_zip(zip_part, root, zerr, sizeof(zerr));
-        if(zrc == 0) {
-          copies++;
-          size_t len = strlen(updated);
-          snprintf(updated + len, sizeof(updated) - len, "%s%s/PPSA99290", len ? ", " : "", k_app_dirs[i]);
-          gc_log("update: app folder updated: %s", root);
+      zrc = apply_zip_everywhere(zip_part, updated, sizeof(updated), zerr, sizeof(zerr));
+      snprintf(app_dir, sizeof(app_dir), "%s", updated);
+      if(zrc == 1) {
+        /* The running app keeps eboot.bin busy. Keep the zip and apply it as
+         * soon as the app is closed (a background retry, also resumed when
+         * the payload restarts). */
+        if(rename(zip_part, PENDING_ZIP) == 0) {
+          pending_start();
+          pthread_mutex_lock(&st.mutex);
+          snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-pending");
+          snprintf(st.app_path, sizeof(st.app_path), "%s", zerr);
+          st.error[0] = 0;
+          snprintf(st.phase, sizeof(st.phase), "%s", "installed");
+          pthread_mutex_unlock(&st.mutex);
+          gc_log("update: app files busy, will retry when the app closes: %s", zerr);
+          return 0;
         }
       }
-      if(copies == 0 && zrc == 0) { zrc = -1; snprintf(zerr, sizeof(zerr), "no app folder found"); }
-      snprintf(app_dir, sizeof(app_dir), "%s", updated);
       unlink(zip_part);
     }
     if(zrc != 0) {

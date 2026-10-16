@@ -309,8 +309,9 @@ std::vector<App::SettingsRow> App::settings_rows() const
     else if (u.phase == "installed")
     {
         update.label = tr("Update installed");
-        update.value = u.app_status == "folder-copy" ? tr("app folder copy: update by hand")
-                                                     : tr("reopen the app");
+        update.value = u.app_status == "folder-copy"      ? tr("app folder copy: update by hand")
+                       : u.app_status == "folder-pending" ? tr("close the app: it updates itself")
+                                                          : tr("reopen the app");
     }
     else if (u.phase == "uptodate")
     {

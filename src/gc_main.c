@@ -21,6 +21,7 @@
 #include <unistd.h>
 
 #include "gc_app_installer.h"
+#include "gc_update.h"
 #include "gc_api.h"
 #include "gc_diag.h"
 #include "gc_notify.h"
@@ -77,6 +78,7 @@ on_ready(unsigned short port, void *arg) {
   gc_log("web ui ready http://%s:%u/", ip, (unsigned)port);
   gc_notify_message("Open", detail);
   gc_launcher_start();
+  gc_update_start();
 }
 
 static int

@@ -602,7 +602,10 @@ void Store::update_logic(bool alive)
         std::string text;
         if (info.phase == "installed")
         {
-            if (info.app_status == "folder-updated" && !info.app_path.empty())
+            if (info.app_status == "folder-pending")
+                text = tr("Updated to build {build}. Close the app now: the new interface is applied right after, then reopen it.",
+                          {{"build", std::to_string(info.latest_build)}});
+            else if (info.app_status == "folder-updated" && !info.app_path.empty())
                 text = tr("Updated to build {build} in {path}. Close and reopen the app to use it.",
                           {{"build", std::to_string(info.latest_build)}, {"path", info.app_path}});
             else
