@@ -39,13 +39,42 @@ std::string size_text(std::int64_t bytes, bool pending = false, bool estimated =
     return text;
 }
 
-const char *kind_text(const std::string &kind)
+bool ends_with_ci(const std::string &text, const char *suffix)
 {
-    if (kind == "compressed")
-        return "Compressed";
-    if (kind == "folder")
-        return "Folder";
-    if (kind == "image")
+    const std::string tail(suffix);
+    if (text.size() < tail.size())
+        return false;
+    for (std::size_t i = 0; i < tail.size(); ++i)
+    {
+        char c = text[text.size() - tail.size() + i];
+        if (c >= 'A' && c <= 'Z')
+            c = static_cast<char>(c - 'A' + 'a');
+        if (c != tail[i])
+            return false;
+    }
+    return true;
+}
+
+// The container's real type, from its file name: Dump (game folder), exFAT,
+// FFPFSC, FFPKG, PKG...
+std::string kind_text(const Game &game)
+{
+    const std::string &path = game.source_path;
+    if (game.source_kind == "folder")
+        return "Dump";
+    if (ends_with_ci(path, ".ffpfsc"))
+        return "FFPFSC";
+    if (ends_with_ci(path, ".exfat"))
+        return "exFAT";
+    if (ends_with_ci(path, ".ffpkg"))
+        return "FFPKG";
+    if (ends_with_ci(path, ".pkg"))
+        return "PKG";
+    if (ends_with_ci(path, ".ffpfs"))
+        return "FFPFS";
+    if (game.source_kind == "compressed")
+        return "FFPFSC";
+    if (game.source_kind == "image")
         return "Image";
     return "Unavailable";
 }
@@ -238,7 +267,7 @@ void App::draw(Frame &frame)
                      row.y + 36.0f, 28.0f, 560.0f, color::text);
             ui::text(list, type.regular, game.title_id, row.x + 28.0f, row.y + 64.0f, 20.0f,
                  color::text3);
-            chip(list, type, row.x + 640.0f, row.cy(), kind_text(game.source_kind),
+            chip(list, type, row.x + 640.0f, row.cy(), kind_text(game),
                  color::field_open, color::text2, 18.0f);
             ui::text(list, type.regular, size_text(game.source_size, game.size_pending, game.size_estimated), row.x + row.w - 24.0f,
                  row.cy() + 8.0f, 24.0f, color::text2, Align::right);
@@ -260,7 +289,7 @@ void App::draw(Frame &frame)
             y += 46.0f;
         };
         line("Title ID", game.title_id);
-        line("Type", kind_text(game.source_kind));
+        line("Type", kind_text(game));
         line("Storage", game.storage);
         line("Size", size_text(game.source_size, game.size_pending, game.size_estimated));
         if (game.compressed_size > 0)
