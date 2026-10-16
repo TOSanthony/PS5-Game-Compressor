@@ -15,6 +15,9 @@ export LLVM_CONFIG
 
 BIN := game-compressor.elf
 BUILD_VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+# Monotonic build number (the CI run number). 0 for local builds. The self-update
+# module compares it with the one in the latest release's build-info.json.
+BUILD_NUMBER ?= 0
 
 C_SRCS := src/gc_main.c
 C_SRCS += src/gc_websrv.c
@@ -26,6 +29,7 @@ C_SRCS += src/gc_power_guard.c
 C_SRCS += src/gc_app_installer.c
 C_SRCS += src/gc_shadowmount.c
 C_SRCS += src/gc_size_cache.c
+C_SRCS += src/gc_update.c
 C_SRCS += src/gc_icon_thumb.c
 C_SRCS += src/ampr_index.c
 C_SRCS += src/asset.c
@@ -46,6 +50,7 @@ CFLAGS_COMMON := -Os -Wall -Werror -Isrc
 CFLAGS_COMMON += -ffunction-sections -fdata-sections -flto
 CFLAGS_COMMON += -DGAME_COMPRESSOR_VERSION=\"$(BUILD_VERSION)\"
 CFLAGS_COMMON += -DGAME_COMPRESSOR_PORT=5910
+CFLAGS_COMMON += -DGC_BUILD_NUMBER=$(BUILD_NUMBER)
 CFLAGS_COMMON += -DVERSION_TAG=\"game-compressor\"
 CFLAGS_COMMON += -DBUILD_VERSION=\"$(BUILD_VERSION)\"
 CFLAGS_COMMON += -DMINIZ_USE_UNALIGNED_LOADS_AND_STORES=1
@@ -76,6 +81,12 @@ FAST_CFLAGS := $(filter-out -Os,$(CFLAGS_COMMON)) -O2
 LDFLAGS_COMMON := -Wl,--gc-sections -flto
 LDADD := -lSceNotification -lSceSystemService
 LDADD += $(ZLIB_LIB)
+# libcurl + OpenSSL (static, built by tools/build-tls-deps.sh) for the self-update.
+TLS_PREFIX := $(PS5_PAYLOAD_SDK)/target/user/homebrew
+CFLAGS_COMMON += -I$(TLS_PREFIX)/include -Igen
+LDADD += -L$(TLS_PREFIX)/lib -lcurl -lssl -lcrypto
+CA_HEADER := gen/gc_ca.h
+CA_BUNDLE ?= /etc/ssl/certs/ca-certificates.crt
 
 all: $(BIN)
 
@@ -93,6 +104,12 @@ $(FAST_OBJS): build/%.o: %.c Makefile
 	"$(CC)" $(FAST_CFLAGS) -c $< -o $@
 
 build/src/gc_app_installer.o: $(APP_ASSETS)
+
+$(CA_HEADER): $(CA_BUNDLE) tools/embed_ca.py
+	mkdir -p gen
+	$(PYTHON) tools/embed_ca.py $< > $@
+
+build/src/gc_update.o: $(CA_HEADER)
 
 build/zlib/%.o: third_party/zlib/%.c $(ZLIB_HEADERS) Makefile
 	mkdir -p $(dir $@)

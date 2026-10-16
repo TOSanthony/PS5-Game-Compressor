@@ -22,6 +22,7 @@
 #include "gc_api.h"
 #include "gc_diag.h"
 #include "gc_json_escape.h"
+#include "gc_update.h"
 #include "websrv.h"
 
 #define HEADER_MAX 65536
@@ -279,6 +280,9 @@ dispatch_request(const http_request_t *req) {
     if(!strcmp(req->path, "/api/control/handoff-shutdown")) {
       return handoff_shutdown_request(req);
     }
+    if(!strcmp(req->path, "/api/gc/update")) {
+      return gc_update_status_request(req);
+    }
     if(!strcmp(req->path, "/api/gc/icon")) {
       return gc_api_icon_request(req);
     }
@@ -291,6 +295,10 @@ dispatch_request(const http_request_t *req) {
   if(!strcmp(req->method, "POST")) {
     if(!strcmp(req->path, "/api/control/shutdown")) {
       return shutdown_request(req);
+    }
+    if(!strcmp(req->path, "/api/gc/update/check") ||
+       !strcmp(req->path, "/api/gc/update/install")) {
+      return gc_update_action_request(req);
     }
     if(!strcmp(req->path, "/api/gc/job/cancel") ||
 	       !strcmp(req->path, "/api/gc/queue/cancel") ||

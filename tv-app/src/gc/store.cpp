@@ -4,6 +4,10 @@
 #include "gc/store.hpp"
 #include "gc/json.hpp"
 
+#include <cstdio>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <utility>
 
 namespace gc
@@ -155,6 +159,12 @@ bool Store::poll_games()
         game.size_status = item.text("sizeStatus");
         game.ampr_present = item.flag("amprPresent");
         game.is_mounted = item.flag("isMounted");
+        game.can_stream_delete = item.flag("canStreamDelete");
+        game.ampr_update_needed = item.flag("amprUpdateNeeded");
+        game.ampr_original_available = item.flag("amprOriginalAvailable");
+        game.ampr_version = item.text("amprVersion");
+        game.ampr_latest_version = item.text("amprLatestVersion");
+        game.ampr_latest_sha256 = item.text("amprLatestSha256");
         game.can_move_to_usb = item.flag("canMoveToUsb");
         game.can_move_to_internal = item.flag("canMoveToInternal");
         if (game.name.empty())
@@ -192,6 +202,100 @@ void Store::poll_targets()
     ++state_.version;
 }
 
+void Store::poll_ampr()
+{
+    http::Request request;
+    request.path = "/api/gc/ampr/versions";
+    const http::Response reply = transport_.send(request);
+    json::Value doc;
+    if (!reply.transported() || reply.status != 200 || !json::parse(reply.body, &doc))
+        return;
+    std::vector<AmprVersion> versions;
+    for (const json::Value &item : doc["versions"].items())
+        if (!item.text("version").empty() && item.text("sha256").size() == 64)
+            versions.push_back({item.text("version"), item.text("sha256")});
+    Lock lock(mutex_);
+    state_.ampr_versions = std::move(versions);
+    ++state_.version;
+}
+
+bool Store::poll_update()
+{
+    http::Request request;
+    request.path = "/api/gc/update";
+    const http::Response reply = transport_.send(request);
+    json::Value doc;
+    if (!reply.transported() || reply.status != 200 || !json::parse(reply.body, &doc))
+        return false;
+    UpdateInfo info;
+    info.known = true;
+    info.busy = doc.flag("busy");
+    info.phase = doc.text("phase");
+    info.error = doc.text("error");
+    info.current_version = doc.text("currentVersion");
+    info.latest_version = doc.text("latestVersion");
+    info.app_status = doc.text("appStatus");
+    info.file = doc.text("file");
+    info.current_build = static_cast<std::int64_t>(doc.number("currentBuild"));
+    info.latest_build = static_cast<std::int64_t>(doc.number("latestBuild"));
+    info.received = static_cast<std::int64_t>(doc.number("received"));
+    info.total = static_cast<std::int64_t>(doc.number("total"));
+    info.available = doc.flag("available");
+    info.elf_saved = doc.flag("elfSaved");
+    Lock lock(mutex_);
+    state_.update = std::move(info);
+    ++state_.version;
+    return true;
+}
+
+namespace
+{
+constexpr const char *kSettingsDir = "/data/game-compressor";
+constexpr const char *kSettingsFile = "/data/game-compressor/tv-app.conf";
+} // namespace
+
+void Store::load_settings()
+{
+    const int fd = open(kSettingsFile, O_RDONLY);
+    if (fd < 0)
+        return;
+    char text[128] = {};
+    const ssize_t n = read(fd, text, sizeof(text) - 1);
+    close(fd);
+    if (n <= 0)
+        return;
+    Lock lock(mutex_);
+    state_.auto_update = std::string(text).find("auto_update=0") == std::string::npos;
+}
+
+void Store::save_settings()
+{
+    bool on;
+    {
+        Lock lock(mutex_);
+        on = state_.auto_update;
+    }
+    mkdir(kSettingsDir, 0755);
+    const int fd = open(kSettingsFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0)
+        return;
+    const char *line = on ? "auto_update=1\n" : "auto_update=0\n";
+    if (write(fd, line, 14) < 0)
+    {
+    }
+    close(fd);
+}
+
+void Store::set_auto_update(bool on)
+{
+    {
+        Lock lock(mutex_);
+        state_.auto_update = on;
+        ++state_.version;
+    }
+    save_settings();
+}
+
 void Store::run_command(const Command &command)
 {
     http::Request request;
@@ -206,6 +310,19 @@ void Store::run_command(const Command &command)
         request.path = "/api/gc/size-priority?path=" + encode(command.source_path);
         transport_.send(request);
         poll_games();
+        return;
+    case Verb::update_check:
+        request.path = "/api/gc/update/check";
+        transport_.send(request);
+        poll_update();
+        return;
+    case Verb::update_install:
+        request.path = "/api/gc/update/install";
+        transport_.send(request);
+        poll_update();
+        return;
+    case Verb::restart_payload:
+        restart_pending_ = true;
         return;
     case Verb::action:
         request.path = command.path;
@@ -243,10 +360,73 @@ void Store::run_command(const Command &command)
     poll_job();
 }
 
+// Start-up check, automatic install, and the payload restart that follows.
+void Store::update_logic(bool alive)
+{
+    if (!alive)
+        return;
+    UpdateInfo info;
+    bool automatic;
+    bool busy;
+    {
+        Lock lock(mutex_);
+        info = state_.update;
+        automatic = state_.auto_update;
+        busy = state_.job.busy;
+    }
+    if (!update_checked_)
+    {
+        update_checked_ = true;
+        http::Request request;
+        request.method = "POST";
+        request.path = "/api/gc/update/check";
+        transport_.send(request);
+        poll_update();
+        return;
+    }
+    if (automatic && info.known && info.phase == "available" && info.available && !busy &&
+        installed_build_ != info.latest_build)
+    {
+        installed_build_ = info.latest_build;
+        http::Request request;
+        request.method = "POST";
+        request.path = "/api/gc/update/install";
+        transport_.send(request);
+        poll_update();
+        set_message("Updating Game Compressor to build " + std::to_string(info.latest_build) + "...");
+        return;
+    }
+    if (info.phase == "installed" && info.elf_saved && restarted_build_ != info.latest_build)
+    {
+        restart_pending_ = true;
+        restarted_build_ = info.latest_build;
+    }
+    if (restart_pending_ && !busy && starter_)
+    {
+        restart_pending_ = false;
+        const starter::Result result = starter_->start();
+        std::string text;
+        if (info.phase == "installed")
+        {
+            text = "Updated to build " + std::to_string(info.latest_build) +
+                   (info.app_status == "folder-copy"
+                        ? ". The app folder copy was not changed: update it by hand."
+                        : ". Close and reopen the app to use the new interface.");
+        }
+        else
+        {
+            text = result.detail;
+        }
+        set_message(text);
+    }
+}
+
 void Store::run()
 {
+    load_settings();
     double last_games = -1000.0;
     double last_start = -1000.0;
+    double last_ampr = -1000.0;
     int misses = 0;
     for (;;)
     {
@@ -262,6 +442,19 @@ void Store::run()
 
         const bool alive = poll_job();
         const double now = now_seconds();
+        if (alive)
+        {
+            bool active;
+            {
+                Lock lock(mutex_);
+                const std::string &phase = state_.update.phase;
+                active = state_.update.busy || phase == "checking" || phase == "downloading" ||
+                         phase == "verifying" || phase == "installing";
+            }
+            if (active)
+                poll_update();
+            update_logic(true);
+        }
         if (alive)
         {
             misses = 0;
@@ -281,6 +474,17 @@ void Store::run()
                 {
                     last_games = now;
                     poll_targets();
+                    bool any_ampr = false;
+                    {
+                        Lock lock(mutex_);
+                        for (const Game &game : state_.games)
+                            any_ampr = any_ampr || game.ampr_present;
+                    }
+                    if (any_ampr && now - last_ampr > 60.0)
+                    {
+                        last_ampr = now;
+                        poll_ampr();
+                    }
                 }
             }
         }

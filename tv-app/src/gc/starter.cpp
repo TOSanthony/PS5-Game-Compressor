@@ -138,8 +138,28 @@ const char *outcome_name(Outcome outcome)
 
 } // namespace
 
+// Build numbers: all digits ("37"); the CI run number the release was built from.
+static bool build_number(std::string_view text, unsigned long long *value)
+{
+    if (text.empty() || text.size() > 12)
+        return false;
+    unsigned long long v = 0;
+    for (const char c : text)
+    {
+        if (c < '0' || c > '9')
+            return false;
+        v = v * 10 + static_cast<unsigned>(c - '0');
+    }
+    *value = v;
+    return true;
+}
+
 int compare_versions(std::string_view a, std::string_view b)
 {
+    unsigned long long na = 0;
+    unsigned long long nb = 0;
+    if (build_number(a, &na) && build_number(b, &nb))
+        return na == nb ? 0 : na > nb ? 1 : -1;
     std::array<unsigned, 5> x{};
     std::array<unsigned, 5> y{};
     const bool valid_a = version_parts(a, &x);

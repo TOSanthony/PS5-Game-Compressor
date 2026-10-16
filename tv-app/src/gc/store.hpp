@@ -39,6 +39,37 @@ struct Game
     bool is_mounted = false;
     bool can_move_to_usb = false;
     bool can_move_to_internal = false;
+    bool can_stream_delete = false;
+    bool ampr_update_needed = false;
+    bool ampr_original_available = false;
+    std::string ampr_version;
+    std::string ampr_latest_version;
+    std::string ampr_latest_sha256;
+};
+
+struct AmprVersion
+{
+    std::string version;
+    std::string sha256;
+};
+
+// The payload's self-update (/api/gc/update).
+struct UpdateInfo
+{
+    bool known = false; // the payload answered at least once
+    bool busy = false;
+    std::string phase = "idle"; // idle checking available uptodate downloading verifying installing installed error
+    std::string error;
+    std::string current_version;
+    std::string latest_version;
+    std::string app_status; // replaced created folder-copy none
+    std::string file;
+    std::int64_t current_build = 0;
+    std::int64_t latest_build = 0;
+    std::int64_t received = 0;
+    std::int64_t total = 0;
+    bool available = false;
+    bool elf_saved = false;
 };
 
 struct Target
@@ -83,6 +114,9 @@ struct Snapshot
     bool games_loaded = false;
     std::vector<Game> games;
     std::vector<Target> targets; // USB / extended storage
+    std::vector<AmprVersion> ampr_versions; // cached AMPR builds
+    UpdateInfo update;
+    bool auto_update = true;
     Job job;
     std::string message; // last action result or start problem
     std::uint64_t version = 0; // bumps whenever the snapshot changes
@@ -97,6 +131,9 @@ enum class Verb : std::uint8_t
     refresh,
     measure, // asks the payload to measure a folder's size now
     action,  // any POST /api/gc/<path> on a game
+    update_check,
+    update_install,
+    restart_payload, // sends the newest payload copy to the ELF loader
 };
 
 class Store
@@ -110,6 +147,7 @@ class Store
     Snapshot snapshot();
     // Queues an action; game may be null for cancel / refresh.
     void request(Verb verb, const Game *game);
+    void set_auto_update(bool on);
     // Queues POST /api/gc/<path>?titleId&sourcePath[&extra] with a label for the message.
     void act(const std::string &path, const std::string &label, const Game &game,
              const std::string &extra = {});
@@ -130,6 +168,11 @@ class Store
     bool poll_job();
     bool poll_games();
     void poll_targets();
+    void poll_ampr();
+    bool poll_update();
+    void load_settings();
+    void save_settings();
+    void update_logic(bool alive);
     void run_command(const Command &command);
     void set_message(const std::string &text);
 
@@ -140,6 +183,10 @@ class Store
     Snapshot state_;
     std::deque<Command> commands_;
     bool quit_ = false;
+    bool update_checked_ = false;     // the start-up check was sent
+    bool restart_pending_ = false;    // restart the payload once idle
+    std::int64_t installed_build_ = 0; // never install the same build twice per session
+    std::int64_t restarted_build_ = 0;
     Thread thread_;
 };
 

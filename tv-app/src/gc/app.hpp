@@ -55,7 +55,9 @@ class App
     enum class Mode : std::uint8_t
     {
         list,
-        menu, // action menu for the selected game
+        menu,     // action menu for the selected game
+        form,     // options before compress / make image / uncompress
+        settings, // updates and general settings
     };
 
     struct Item
@@ -67,6 +69,10 @@ class App
             move,
             confirm_delete,
             close,
+            form_compress,
+            form_make_image,
+            form_uncompress,
+            ampr,
         };
         std::string label;
         std::string path;  // POST /api/gc/<path>
@@ -75,6 +81,42 @@ class App
         Next next = Next::run;
     };
 
+    struct FormRow
+    {
+        std::string label;
+        std::vector<std::string> names;
+        std::vector<std::string> values;
+        int index = 0;
+    };
+    struct Form
+    {
+        std::string title;
+        std::string path;
+        std::string label;
+        Item::Next kind = Item::Next::form_compress;
+        std::vector<FormRow> rows;
+    };
+    struct SettingsRow
+    {
+        enum class Kind : std::uint8_t
+        {
+            update,
+            auto_update,
+            restart,
+            refresh,
+            browser,
+        };
+        Kind kind;
+        std::string label;
+        std::string value;
+    };
+
+    Form build_form(const Game &game, Item::Next kind) const;
+    void submit_form(const Game &game);
+    std::vector<SettingsRow> settings_rows() const;
+    void update_settings(const hui::InputFrame &input);
+    void draw_settings(Frame &frame);
+    std::vector<Item> ampr_menu(const Game &game) const;
     std::vector<Item> main_menu(const Game &game) const;
     std::vector<Item> target_menu(const Game &game, bool copy) const;
 
@@ -92,6 +134,9 @@ class App
     float notice_left_ = 0.0f;
     std::string last_message_;
     bool browser_failed_ = false;
+    Form form_;
+    int form_index_ = 0;
+    int settings_index_ = 0;
     std::string measured_path_;
     float measured_age_ = 0.0f;
 };
