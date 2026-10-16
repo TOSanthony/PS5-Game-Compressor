@@ -33,6 +33,7 @@
 
 #define REPO "TOSanthony/PS5-Game-Compressor"
 #define API_LATEST "https://api.github.com/repos/" REPO "/releases/latest"
+#define ATOM_FEED "https://github.com/" REPO "/releases.atom"
 #define API_NEWEST "https://api.github.com/repos/" REPO "/releases?per_page=1"
 #define DOWNLOAD_BASE "https://github.com/" REPO "/releases/download/"
 #define API_BASE "https://api.github.com/repos/" REPO "/"
@@ -90,6 +91,7 @@ fail(const char *message) {
 static int
 url_allowed(const char *url) {
   return !strncmp(url, API_BASE, strlen(API_BASE)) ||
+         !strcmp(url, ATOM_FEED) ||
          !strncmp(url, DOWNLOAD_BASE, strlen(DOWNLOAD_BASE));
 }
 
@@ -236,31 +238,54 @@ build_url(char *out, size_t size, const char *tag, const char *name) {
 
 static int
 do_check(void) {
-  char err[200];
-  sink_t sink = {.fd = -1, .limit = 1 << 20};
-  if(http_get(API_LATEST, &sink, err, sizeof(err)) != 0) {
-    /* No stable release yet (only pre-releases of branch builds): use the
-     * newest release of any kind. */
-    free(sink.data);
-    sink = (sink_t){.fd = -1, .limit = 1 << 20};
-    if(http_get(API_NEWEST, &sink, err, sizeof(err)) != 0) {
-      free(sink.data);
-      fail(err);
-      return -1;
-    }
-  }
+  char err[200], err2[200] = "", err3[200] = "";
   char tag[96] = {0};
-  int ok = sink.data && json_find(sink.data, "tag_name", tag, sizeof(tag)) == 0 &&
-           tag_safe(tag);
+  int ok = 0;
+  sink_t sink = {.fd = -1, .limit = 1 << 20};
+  /* 1. newest release of any kind through the API (branch builds are
+   *    pre-releases, so /releases/latest alone is not enough). */
+  if(http_get(API_NEWEST, &sink, err, sizeof(err)) == 0) {
+    ok = sink.data && json_find(sink.data, "tag_name", tag, sizeof(tag)) == 0 && tag_safe(tag);
+  }
   free(sink.data);
-  if(!ok) { fail("no release found"); return -1; }
+  /* 2. the public releases feed: not subject to the API rate limit. */
+  if(!ok) {
+    sink = (sink_t){.fd = -1, .limit = 1 << 20};
+    if(http_get(ATOM_FEED, &sink, err2, sizeof(err2)) == 0 && sink.data) {
+      const char *m = strstr(sink.data, "/releases/tag/");
+      if(m) {
+        m += strlen("/releases/tag/");
+        size_t n = 0;
+        while(m[n] && m[n] != '"' && m[n] != '<' && n + 1 < sizeof(tag)) { tag[n] = m[n]; n++; }
+        tag[n] = 0;
+        ok = tag_safe(tag);
+      }
+    }
+    free(sink.data);
+  }
+  /* 3. last resort: the latest stable release. */
+  if(!ok) {
+    sink = (sink_t){.fd = -1, .limit = 1 << 20};
+    if(http_get(API_LATEST, &sink, err3, sizeof(err3)) == 0)
+      ok = sink.data && json_find(sink.data, "tag_name", tag, sizeof(tag)) == 0 && tag_safe(tag);
+    free(sink.data);
+  }
+  if(!ok) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "no release found. API: %s | feed: %s | stable: %s",
+             err[0] ? err : "bad answer", err2[0] ? err2 : "bad answer", err3[0] ? err3 : "-");
+    fail(msg);
+    return -1;
+  }
 
   char url[300];
   build_url(url, sizeof(url), tag, "build-info.json");
   sink_t info = {.fd = -1, .limit = 16384};
   if(http_get(url, &info, err, sizeof(err)) != 0) {
     free(info.data);
-    fail("the latest release has no build-info.json");
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%s: %s", tag, err);
+    fail(msg);
     return -1;
   }
   char number[32] = {0}, version[64] = {0};
