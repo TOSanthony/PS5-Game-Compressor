@@ -198,6 +198,7 @@ class Store
     std::map<std::string, int> icon_state_; // 1 queued, 2 ready, 3 failed, 4 taken
     std::map<std::string, IconPixels> icon_ready_;
     bool quit_ = false;
+    bool outdated_handled_ = false;   // the outdated-payload restart was done (or tried)
     bool update_checked_ = false;     // the start-up check was sent
     bool restart_pending_ = false;    // restart the payload once idle
     std::int64_t installed_build_ = 0; // never install the same build twice per session

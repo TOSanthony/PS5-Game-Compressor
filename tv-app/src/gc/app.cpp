@@ -278,6 +278,11 @@ std::vector<App::SettingsRow> App::settings_rows() const
     char text[96];
     if (!u.known)
         update.value = "Payload not reachable";
+    else if (u.phase == "unsupported")
+    {
+        update.label = "Payload outdated";
+        update.value = "restarting it from this app's copy...";
+    }
     else if (u.phase == "checking")
     {
         update.label = "Checking for updates...";

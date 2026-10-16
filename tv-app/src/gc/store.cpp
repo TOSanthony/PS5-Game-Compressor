@@ -329,6 +329,17 @@ bool Store::poll_update()
     request.path = "/api/gc/update";
     const http::Response reply = transport_.send(request);
     json::Value doc;
+    if (reply.transported() && reply.status == 404)
+    {
+        // A payload from before the self-update existed: it needs restarting from this app's copy.
+        UpdateInfo old;
+        old.known = true;
+        old.phase = "unsupported";
+        Lock lock(mutex_);
+        state_.update = std::move(old);
+        ++state_.version;
+        return false;
+    }
     if (!reply.transported() || reply.status != 200 || !json::parse(reply.body, &doc))
         return false;
     UpdateInfo info;
@@ -478,8 +489,41 @@ void Store::update_logic(bool alive)
         automatic = state_.auto_update;
         busy = state_.job.busy;
     }
+    if (!info.known)
+    {
+        poll_update();
+        Lock lock(mutex_);
+        info = state_.update;
+    }
+    // The payload still running is older than the copy shipped with (or saved for) this app:
+    // restart it from that copy, once per session. The new instance takes over the port.
+    if (!outdated_handled_ && !busy)
+    {
+        bool outdated = info.phase == "unsupported";
+        if (info.known && info.phase != "unsupported")
+        {
+            const starter::Payload best = starter::choose(starter::Locations{});
+            outdated = !best.path.empty() &&
+                       starter::compare_versions(best.version, std::to_string(info.current_build)) > 0;
+        }
+        if (outdated)
+        {
+            outdated_handled_ = true;
+            update_checked_ = false;
+            starter::Result result = starter_ ? starter_->start() : starter::Result{};
+            set_message(result.outcome == starter::Outcome::sent
+                            ? "Restarted the payload with the version bundled in this app."
+                            : "The running payload is outdated: " + result.detail);
+            return;
+        }
+    }
     if (!update_checked_)
     {
+        if (info.phase == "unsupported")
+        {
+            poll_update(); // waits for the restarted payload to answer
+            return;
+        }
         update_checked_ = true;
         http::Request request;
         request.method = "POST";
