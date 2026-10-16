@@ -834,7 +834,6 @@ void App::draw(Frame &frame)
     if (mode_ == Mode::menu && count > 0)
     {
         DrawList &over = frame.overlay;
-        over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x000000, 0.6f));
         const int n = static_cast<int>(menu_.size());
         const float height = 150.0f + static_cast<float>(n) * 70.0f;
         const Rect box{610.0f, std::max(40.0f, (1080.0f - height) * 0.5f), 700.0f, height};
@@ -857,7 +856,6 @@ void App::draw(Frame &frame)
     if (mode_ == Mode::form && count > 0 && !form_.rows.empty())
     {
         DrawList &over = frame.overlay;
-        over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x000000, 0.6f));
         const int rows = static_cast<int>(form_.rows.size());
         const float height = 190.0f + static_cast<float>(rows + 1) * 78.0f;
         const Rect box{460.0f, std::max(30.0f, (1080.0f - height) * 0.5f), 1000.0f, height};
@@ -933,7 +931,7 @@ void App::draw_settings(Frame &frame)
     using namespace ui;
     const Type &type = context_.type;
     DrawList &over = frame.overlay;
-    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.97f));
+    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, color::sheet);
     ui::text(over, type.light, tr("Settings"), kGutter, 118.0f, 64.0f, color::text);
     const std::vector<SettingsRow> rows = settings_rows();
     const float x = 360.0f;

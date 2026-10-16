@@ -49,6 +49,8 @@ inline const Color field_edge = Color::rgb(0xffffff, 0.06f);
 inline const Color glass = Color::rgb(0x080808, 0.62f);
 inline const Color glass_on = Color::rgb(0x202020, 0.82f);
 // An open list: a frosted panel over the screen.
+// The Settings screen and the popups share this exact background.
+inline const Color sheet = Color::rgb(0x050507, 0.97f);
 inline const Color popover = Color::rgb(0x141414, 0.9f);
 } // namespace color
 

@@ -245,8 +245,7 @@ void progress_bar(DrawList &list, const Rect &r, float fraction, Color fill)
 
 void modal(DrawList &list, const Rect &r)
 {
-    list.shadow({r.x, r.y + 30.0f, r.w, r.h}, kPanelRadius, 90.0f, Color::rgb(0x000000, 0.6f));
-    list.rounded_rect(r, kPanelRadius, Color::rgb(0x050507, 0.97f)); // same as the Settings screen
+    list.rounded_rect(r, kPanelRadius, color::sheet); // exactly the Settings background
     list.bordered_rect(r, kPanelRadius, Color{0, 0, 0, 0}, 1.0f, color::line);
 }
 
