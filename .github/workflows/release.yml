@@ -54,21 +54,25 @@ jobs:
           readelf -h game-compressor.elf | grep -Eq 'Class:[[:space:]]+ELF64'
           readelf -h game-compressor.elf | grep -Eq 'Machine:[[:space:]]+Advanced Micro Devices X86-64'
 
-      - name: Build experimental launcher eboot (when present)
+      - name: Set up .NET 8 (UFS2Tool builds the ffpkg image)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install full-screen app build tools
         run: |
-          if [[ -f tools/fullscreen-launcher/Makefile ]]; then
-            make -C tools/fullscreen-launcher ffpkg
-            cp tools/fullscreen-launcher/out/eboot.bin launcher-eboot.bin
-            cp tools/fullscreen-launcher/out/PSGC50002.ffpkg PSGC50002.ffpkg
-            # Fallback for building the ffpkg with another tool (e.g. PSFFPKG).
-            (cd tools/fullscreen-launcher/out/app &&
-              python3 -m zipfile -c "$GITHUB_WORKSPACE/PSGC50002-app.zip" PSGC50002)
-          fi
+          sudo apt-get install -y --no-install-recommends ninja-build pkg-config git ca-certificates wget xz-utils zstd tar python3-pil libclang-rt-18-dev
+
+      - name: Build full-screen app (PPSA99290)
+        run: |
+          make -C tv-app GC_PAYLOAD=../game-compressor.elf GC_VERSION="$(git describe --tags --always --dirty)" ffpkg
+          cp tv-app/dist/PPSA99290.ffpkg PPSA99290.ffpkg
+          cp tv-app/dist/PPSA99290.zip PPSA99290-app.zip
 
       - name: Checksums
         run: |
           files=(game-compressor.elf)
-          for f in launcher-eboot.bin PSGC50002.ffpkg PSGC50002-app.zip; do
+          for f in PPSA99290.ffpkg PPSA99290-app.zip; do
             [[ -f "$f" ]] && files+=("$f")
           done
           sha256sum "${files[@]}" > SHA256SUMS
@@ -80,9 +84,8 @@ jobs:
           name: game-compressor-${{ github.sha }}
           path: |
             game-compressor.elf
-            launcher-eboot.bin
-            PSGC50002.ffpkg
-            PSGC50002-app.zip
+            PPSA99290.ffpkg
+            PPSA99290-app.zip
             SHA256SUMS
 
       - name: Publish GitHub release
@@ -92,7 +95,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           files=(game-compressor.elf SHA256SUMS)
-          for f in launcher-eboot.bin PSGC50002.ffpkg PSGC50002-app.zip; do
+          for f in PPSA99290.ffpkg PPSA99290-app.zip; do
             [[ -f "$f" ]] && files+=("$f")
           done
 

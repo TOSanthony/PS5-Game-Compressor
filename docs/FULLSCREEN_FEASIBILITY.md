@@ -75,3 +75,21 @@ Both build cleanly with SDK v0.43 and Clang 18.
   `eboot.bin` (files under `/system_ex/app/<TITLE_ID>`, as in the SDK sample)
   changes how the tile is installed and needs on-console testing first.
 - Whether the system browser app is acceptable as "full screen".
+
+## Update: native full-screen app (`tv-app/`)
+
+The experimental launcher eboot was replaced by a real native application in
+`tv-app/` (title `PPSA99290`, "Game Compressor"). It reuses the app toolkit of
+the Orbit Store TV app (ps5-homebrew-ui / ps5-native-app-boilerplate by
+BlackBearReloaded, GPL-3.0-or-later) and renders full screen with OpenGL.
+It bundles `game-compressor.elf`, starts it through the ELF loader (port 9021)
+when needed, and drives it over `127.0.0.1:5910` (game list, compress,
+validate, validate-and-repair, cancel, live progress). The complete web UI
+remains reachable from the app (Triangle).
+
+`tv-app/` is GPL-3.0-or-later (see `tv-app/NOTICE.md`); the payload is a separate
+program that only talks to it over HTTP.
+
+Build: `make -C tv-app GC_PAYLOAD=../game-compressor.elf ffpkg` (clang-18, .NET 8
+for the UFS2 image). CI publishes `PPSA99290.ffpkg` and `PPSA99290-app.zip`.
+Status: compiles and signs here; **not yet tested on a console**.
