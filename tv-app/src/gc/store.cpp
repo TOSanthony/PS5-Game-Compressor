@@ -139,6 +139,9 @@ bool Store::poll_games()
         game.source_size = static_cast<std::int64_t>(item.number("sourceSize"));
         game.compressed_size = static_cast<std::int64_t>(item.number("compressedSize"));
         game.saved_bytes = static_cast<std::int64_t>(item.number("savedBytes"));
+        game.size_pending = item.flag("sizePending");
+        game.size_estimated = item.flag("sizeEstimated");
+        game.size_status = item.text("sizeStatus");
         if (game.name.empty())
             game.name = game.title_id;
         if (!game.title_id.empty())
@@ -159,6 +162,11 @@ void Store::run_command(const Command &command)
     switch (command.verb)
     {
     case Verb::refresh:
+        poll_games();
+        return;
+    case Verb::measure:
+        request.path = "/api/gc/size-priority?path=" + encode(command.source_path);
+        transport_.send(request);
         poll_games();
         return;
     case Verb::cancel:
@@ -216,13 +224,16 @@ void Store::run()
         {
             misses = 0;
             bool busy;
+            bool sizing = false;
             {
                 Lock lock(mutex_);
                 busy = state_.job.busy;
+                for (const Game &game : state_.games)
+                    sizing = sizing || (game.source_kind == "folder" && game.size_pending);
                 if (state_.link != Link::online)
                     state_.link = Link::online;
             }
-            if (!state_.games_loaded || now - last_games > (busy ? 15.0 : 5.0))
+            if (!state_.games_loaded || now - last_games > (sizing ? 2.0 : busy ? 15.0 : 5.0))
             {
                 if (poll_games())
                     last_games = now;

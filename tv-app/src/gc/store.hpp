@@ -32,6 +32,9 @@ struct Game
     std::int64_t source_size = 0;
     std::int64_t compressed_size = 0;
     std::int64_t saved_bytes = 0;
+    bool size_pending = false;   // folder size not measured yet
+    bool size_estimated = false; // cached value, may be stale
+    std::string size_status;
 };
 
 struct Job
@@ -80,6 +83,7 @@ enum class Verb : std::uint8_t
     repair,
     cancel,
     refresh,
+    measure, // asks the payload to measure a folder's size now
 };
 
 class Store

@@ -22,8 +22,12 @@ constexpr float kListY = 190.0f;
 constexpr float kListW = 980.0f;
 constexpr float kListBottom = 880.0f;
 
-std::string size_text(std::int64_t bytes)
+std::string size_text(std::int64_t bytes, bool pending = false, bool estimated = false)
 {
+    if (pending && bytes <= 0)
+        return "Measuring...";
+    if (estimated && bytes > 0)
+        return "~" + size_text(bytes);
     char text[32];
     const double value = static_cast<double>(bytes);
     if (bytes >= (1ll << 30))
@@ -142,6 +146,21 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
     if (input.is_pressed(Action::menu) || input.is_pressed(Action::touch))
         context_.store.request(Verb::refresh, nullptr);
 
+    // Folder sizes are not measured by the library scan: ask the payload to
+    // measure the selected folder (again after 20 s if it is still unknown).
+    measured_age_ += dt;
+    if (count > 0)
+    {
+        const Game &game = state_.games[static_cast<std::size_t>(selected_)];
+        const bool unknown = game.source_kind == "folder" && game.size_pending;
+        if (unknown && (game.source_path != measured_path_ || measured_age_ > 20.0f))
+        {
+            measured_path_ = game.source_path;
+            measured_age_ = 0.0f;
+            context_.store.request(Verb::measure, &game);
+        }
+    }
+
     // Keep the selection in view.
     const float view = kListBottom - kListY;
     const float top = static_cast<float>(selected_) * kRowH;
@@ -221,7 +240,7 @@ void App::draw(Frame &frame)
                  color::text3);
             chip(list, type, row.x + 640.0f, row.cy(), kind_text(game.source_kind),
                  color::field_open, color::text2, 18.0f);
-            ui::text(list, type.regular, size_text(game.source_size), row.x + row.w - 24.0f,
+            ui::text(list, type.regular, size_text(game.source_size, game.size_pending, game.size_estimated), row.x + row.w - 24.0f,
                  row.cy() + 8.0f, 24.0f, color::text2, Align::right);
         }
         list.pop_clip();
@@ -243,7 +262,7 @@ void App::draw(Frame &frame)
         line("Title ID", game.title_id);
         line("Type", kind_text(game.source_kind));
         line("Storage", game.storage);
-        line("Size", size_text(game.source_size));
+        line("Size", size_text(game.source_size, game.size_pending, game.size_estimated));
         if (game.compressed_size > 0)
             line("Compressed", size_text(game.compressed_size));
         if (game.saved_bytes > 0)

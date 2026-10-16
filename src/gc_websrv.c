@@ -312,6 +312,7 @@ dispatch_request(const http_request_t *req) {
 	       !strcmp(req->path, "/api/gc/ui-settings") ||
 	       !strcmp(req->path, "/api/gc/ampr/upload") ||
 	       !strcmp(req->path, "/api/gc/update-ampr") ||
+	       !strcmp(req->path, "/api/gc/size-priority") ||
 	       !strcmp(req->path, "/api/gc/restore-ampr-original")) {
       return gc_api_request(req, req->path);
     }

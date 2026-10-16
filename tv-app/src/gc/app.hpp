@@ -76,6 +76,8 @@ class App
     float notice_left_ = 0.0f;
     std::string last_message_;
     bool browser_failed_ = false;
+    std::string measured_path_;
+    float measured_age_ = 0.0f;
 };
 
 } // namespace gc
