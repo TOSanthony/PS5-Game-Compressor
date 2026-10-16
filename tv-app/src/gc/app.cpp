@@ -562,6 +562,21 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
     if (input.is_pressed(Action::touch))
         context_.store.request(Verb::refresh, nullptr);
 
+    // Icon of the selected game: fetched once, uploaded to a texture here.
+    if (count > 0)
+    {
+        const std::string &title = state_.games[static_cast<std::size_t>(selected_)].title_id;
+        if (icons_.count(title) == 0)
+        {
+            context_.store.want_icon(title);
+            IconPixels pixels;
+            if (context_.make_texture && context_.store.take_icon(title, &pixels))
+                icons_[title] = {context_.make_texture(pixels.width, pixels.height,
+                                                       pixels.rgba.data()),
+                                 pixels.width, pixels.height};
+        }
+    }
+
     // Folder sizes are not measured by the library scan: ask the payload to
     // measure the selected folder (again after 20 s if it is still unknown).
     measured_age_ += dt;
@@ -671,10 +686,17 @@ void App::draw(Frame &frame)
         const Game &game = state_.games[static_cast<std::size_t>(selected_)];
         const Rect panel{1160.0f, kListY, 1920.0f - kGutter - 1160.0f, kListBottom - kListY};
         surface(list, panel, kPanelRadius, color::field);
-        float y = panel.y + 66.0f;
-        y = ui::paragraph(list, type.light, game.name, panel.x + 36.0f, y, 38.0f, panel.w - 72.0f, 46.0f,
-                      color::text, 2);
-        y += 14.0f;
+        const Rect icon_box{panel.x + 36.0f, panel.y + 34.0f, 176.0f, 176.0f};
+        const auto icon = icons_.find(game.title_id);
+        if (icon != icons_.end() && icon->second.texture != 0)
+            image_cover(list, icon->second.texture, icon->second.width, icon->second.height,
+                        icon_box, Color::rgb(0xffffff), 22.0f);
+        else
+            cover_placeholder(list, type, icon_box, game.name, 22.0f);
+        float y = ui::paragraph(list, type.light, game.name, icon_box.x + icon_box.w + 28.0f,
+                                panel.y + 84.0f, 34.0f, panel.w - 72.0f - icon_box.w - 28.0f, 42.0f,
+                                color::text, 3);
+        y = std::max(y, icon_box.y + icon_box.h) + 52.0f;
         const auto line = [&](const char *label, const std::string &value)
         {
             ui::text(list, type.regular, label, panel.x + 36.0f, y, 20.0f, color::text3);

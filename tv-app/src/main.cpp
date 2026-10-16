@@ -107,6 +107,8 @@ int main()
     context.app_version = read_content_version("/app0/sce_sys/param.json");
     context.open_browser = []
     { return sceSystemServiceLaunchWebBrowser(kBrowserUrl, nullptr) == 0; };
+    context.make_texture = [&renderer](int w, int h, const std::uint8_t *rgba)
+    { return renderer.batch().create_texture(w, h, rgba); };
     gc::App app(context);
     gc::Frame frame;
     sys::log("[GC] ready version=%s", context.app_version.c_str());

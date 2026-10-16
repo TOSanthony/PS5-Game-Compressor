@@ -4,6 +4,11 @@
 #include "gc/store.hpp"
 #include "gc/json.hpp"
 
+extern "C"
+{
+#include "third_party/stb/stb_image.inc"
+}
+
 #include <cstdio>
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -200,6 +205,105 @@ void Store::poll_targets()
     Lock lock(mutex_);
     state_.targets = std::move(targets);
     ++state_.version;
+}
+
+void Store::want_icon(const std::string &title_id)
+{
+    {
+        Lock lock(mutex_);
+        if (title_id.empty() || icon_state_.count(title_id) != 0 || icon_state_.size() >= 96)
+            return;
+        icon_state_[title_id] = 1;
+        icon_queue_.push_back(title_id);
+    }
+    wake_.notify();
+}
+
+bool Store::take_icon(const std::string &title_id, IconPixels *out)
+{
+    Lock lock(mutex_);
+    const auto it = icon_ready_.find(title_id);
+    if (it == icon_ready_.end())
+        return false;
+    *out = std::move(it->second);
+    icon_ready_.erase(it);
+    icon_state_[title_id] = 4;
+    return true;
+}
+
+// PNG icons (usually 512 x 512) are reduced to at most 256 px with a box filter.
+void Store::fetch_icons()
+{
+    for (;;)
+    {
+        std::string id;
+        {
+            Lock lock(mutex_);
+            if (icon_queue_.empty() || quit_)
+                return;
+            id = icon_queue_.front();
+            icon_queue_.pop_front();
+        }
+        http::Request request;
+        request.path = "/api/gc/icon?titleId=" + encode(id);
+        request.max_bytes = 3u << 20;
+        const http::Response reply = transport_.send(request);
+        IconPixels pixels;
+        if (reply.transported() && reply.status == 200 && !reply.body.empty())
+        {
+            int w = 0;
+            int h = 0;
+            int channels = 0;
+            unsigned char *data = stbi_load_from_memory(
+                reinterpret_cast<const unsigned char *>(reply.body.data()),
+                static_cast<int>(reply.body.size()), &w, &h, &channels, 4);
+            if (data && w > 0 && h > 0 && w <= 2048 && h <= 2048)
+            {
+                int step = 1;
+                while (w / step > 256 || h / step > 256)
+                    ++step;
+                const int ow = w / step;
+                const int oh = h / step;
+                pixels.width = ow;
+                pixels.height = oh;
+                pixels.rgba.resize(static_cast<std::size_t>(ow) * static_cast<std::size_t>(oh) * 4);
+                for (int y = 0; y < oh; ++y)
+                    for (int x = 0; x < ow; ++x)
+                    {
+                        unsigned sum[4] = {0, 0, 0, 0};
+                        for (int dy = 0; dy < step; ++dy)
+                            for (int dx = 0; dx < step; ++dx)
+                            {
+                                const unsigned char *src =
+                                    data + (static_cast<std::size_t>(y * step + dy) *
+                                                static_cast<std::size_t>(w) +
+                                            static_cast<std::size_t>(x * step + dx)) *
+                                               4;
+                                for (int k = 0; k < 4; ++k)
+                                    sum[k] += src[k];
+                            }
+                        std::uint8_t *dst = pixels.rgba.data() +
+                                            (static_cast<std::size_t>(y) *
+                                                 static_cast<std::size_t>(ow) +
+                                             static_cast<std::size_t>(x)) *
+                                                4;
+                        for (int k = 0; k < 4; ++k)
+                            dst[k] = static_cast<std::uint8_t>(sum[k] / static_cast<unsigned>(step * step));
+                    }
+            }
+            if (data)
+                stbi_image_free(data);
+        }
+        Lock lock(mutex_);
+        if (pixels.width > 0)
+        {
+            icon_ready_[id] = std::move(pixels);
+            icon_state_[id] = 2;
+        }
+        else
+            icon_state_[id] = 3;
+        ++state_.version;
+    }
 }
 
 void Store::poll_ampr()
@@ -442,6 +546,8 @@ void Store::run()
 
         const bool alive = poll_job();
         const double now = now_seconds();
+        if (alive)
+            fetch_icons();
         if (alive)
         {
             bool active;

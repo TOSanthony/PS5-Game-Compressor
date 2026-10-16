@@ -148,5 +148,5 @@ jobs:
             gh release upload "$tag" "${files[@]}" --clobber
           else
             gh release create "$tag" "${files[@]}" "${create_args[@]}" \
-              --generate-notes --title "Game Compressor $tag"
+              --generate-notes --title "$GC_VERSION_TAG"
           fi

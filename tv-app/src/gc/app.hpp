@@ -11,6 +11,7 @@
 #include "ui/feedback.hpp"
 
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -41,6 +42,8 @@ struct Context
     const hui::ui::Fonts &fonts;
     Store &store;
     std::string app_version;
+    // Uploads RGBA pixels as a texture (the renderer's batch); 0 on failure.
+    std::function<std::uint32_t(int, int, const std::uint8_t *)> make_texture;
     std::function<bool()> open_browser; // the full web interface, in the system browser
 };
 
@@ -134,6 +137,13 @@ class App
     float notice_left_ = 0.0f;
     std::string last_message_;
     bool browser_failed_ = false;
+    struct IconTexture
+    {
+        std::uint32_t texture = 0;
+        int width = 0;
+        int height = 0;
+    };
+    std::map<std::string, IconTexture> icons_;
     Form form_;
     int form_index_ = 0;
     int settings_index_ = 0;

@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -70,6 +71,13 @@ struct UpdateInfo
     std::int64_t total = 0;
     bool available = false;
     bool elf_saved = false;
+};
+
+struct IconPixels
+{
+    int width = 0;
+    int height = 0;
+    std::vector<std::uint8_t> rgba; // width * height * 4
 };
 
 struct Target
@@ -148,6 +156,9 @@ class Store
     // Queues an action; game may be null for cancel / refresh.
     void request(Verb verb, const Game *game);
     void set_auto_update(bool on);
+    // Game icons: want_icon() queues the fetch; take_icon() hands the decoded pixels over once.
+    void want_icon(const std::string &title_id);
+    bool take_icon(const std::string &title_id, IconPixels *out);
     // Queues POST /api/gc/<path>?titleId&sourcePath[&extra] with a label for the message.
     void act(const std::string &path, const std::string &label, const Game &game,
              const std::string &extra = {});
@@ -169,6 +180,7 @@ class Store
     bool poll_games();
     void poll_targets();
     void poll_ampr();
+    void fetch_icons();
     bool poll_update();
     void load_settings();
     void save_settings();
@@ -182,6 +194,9 @@ class Store
     Signal wake_;
     Snapshot state_;
     std::deque<Command> commands_;
+    std::deque<std::string> icon_queue_;
+    std::map<std::string, int> icon_state_; // 1 queued, 2 ready, 3 failed, 4 taken
+    std::map<std::string, IconPixels> icon_ready_;
     bool quit_ = false;
     bool update_checked_ = false;     // the start-up check was sent
     bool restart_pending_ = false;    // restart the payload once idle
