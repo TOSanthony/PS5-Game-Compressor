@@ -15,6 +15,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <zlib.h>
 #include <curl/curl.h>
 #include <openssl/evp.h>
 
@@ -36,6 +37,8 @@
 #define DOWNLOAD_BASE "https://github.com/" REPO "/releases/download/"
 #define API_BASE "https://api.github.com/repos/" REPO "/"
 #define APP_FILE "PPSA99290.ffpkg"
+#define ZIP_FILE "PPSA99290-app.zip"
+#define MAX_ZIP (160LL << 20)
 #define ELF_FILE "game-compressor.elf"
 #define DATA_DIR "/data/GameCompressor" /* the payload's own, known-writable directory */
 #define MAX_ELF (64LL << 20)
@@ -379,11 +382,14 @@ find_app_dir(char *dir, size_t size, int *folder_copy, int *existing) {
     char p[400];
     struct stat s;
     snprintf(p, sizeof(p), "%s/PPSA99290/eboot.bin", k_app_dirs[i]);
-    if(!stat(p, &s)) *folder_copy = 1;
+    if(!*folder_copy && !stat(p, &s)) {
+      *folder_copy = 1;
+      snprintf(dir, size, "%s", k_app_dirs[i]);
+    }
     snprintf(p, sizeof(p), "%s/" APP_FILE, k_app_dirs[i]);
     if(!*existing && !stat(p, &s) && S_ISREG(s.st_mode)) {
       *existing = 1;
-      snprintf(dir, size, "%s", k_app_dirs[i]);
+      if(!*folder_copy) snprintf(dir, size, "%s", k_app_dirs[i]);
     }
   }
 }
@@ -418,6 +424,120 @@ copy_over(const char *src, const char *dest) {
   return 0;
 }
 
+
+static void
+mkdir_p(char *path) {
+  for(char *c = path + 1; *c; c++) {
+    if(*c != '/') continue;
+    *c = 0;
+    mkdir(path, 0755);
+    *c = '/';
+  }
+}
+
+static uint32_t rd16(const unsigned char *p) { return p[0] | (p[1] << 8); }
+static uint32_t rd32(const unsigned char *p) { return rd16(p) | ((uint32_t)rd16(p + 2) << 16); }
+
+/* Extracts the release zip (PPSA99290/...) into <app_dir>. Each file is
+ * written under a temporary name and renamed into place. Returns 0 on success. */
+static int
+extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err_size) {
+  int fd = open(zip_path, O_RDONLY);
+  if(fd < 0) { snprintf(err, err_size, "cannot open %s: %s", zip_path, strerror(errno)); return -1; }
+  off_t size = lseek(fd, 0, SEEK_END);
+  unsigned char *z = size > 22 ? malloc((size_t)size) : NULL;
+  if(!z || pread(fd, z, (size_t)size, 0) != size) {
+    close(fd); free(z);
+    snprintf(err, err_size, "cannot read the app zip");
+    return -1;
+  }
+  close(fd);
+  int rc = -1;
+  long eocd = -1;
+  for(long i = (long)size - 22; i >= 0 && i > (long)size - 70000; i--) {
+    if(rd32(z + i) == 0x06054b50u) { eocd = i; break; }
+  }
+  if(eocd < 0) { snprintf(err, err_size, "the app zip is damaged"); goto done; }
+  unsigned count = rd16(z + eocd + 10);
+  uint32_t pos = rd32(z + eocd + 16);
+  static unsigned char iobuf[1 << 16];
+  for(unsigned n = 0; n < count; n++) {
+    if((int64_t)pos + 46 > size || rd32(z + pos) != 0x02014b50u) {
+      snprintf(err, err_size, "the app zip is damaged"); goto done;
+    }
+    unsigned method = rd16(z + pos + 10);
+    uint32_t crc = rd32(z + pos + 16), csize = rd32(z + pos + 20), usize = rd32(z + pos + 24);
+    unsigned nlen = rd16(z + pos + 28), elen = rd16(z + pos + 30), clen = rd16(z + pos + 32);
+    uint32_t lho = rd32(z + pos + 42);
+    char name[256];
+    if(nlen == 0 || nlen >= sizeof(name) || (int64_t)pos + 46 + nlen > size) {
+      snprintf(err, err_size, "bad name in the app zip"); goto done;
+    }
+    memcpy(name, z + pos + 46, nlen);
+    name[nlen] = 0;
+    pos += 46 + nlen + elen + clen;
+    if(strncmp(name, "PPSA99290/", 10) != 0 || strstr(name, "..") || name[nlen - 1] == '/') continue;
+    if((int64_t)lho + 30 > size || rd32(z + lho) != 0x04034b50u) {
+      snprintf(err, err_size, "the app zip is damaged"); goto done;
+    }
+    int64_t data = (int64_t)lho + 30 + rd16(z + lho + 26) + rd16(z + lho + 28);
+    if(data + csize > size || (method != 0 && method != 8)) {
+      snprintf(err, err_size, "unsupported entry %s", name); goto done;
+    }
+    char dest[460], tmp[470];
+    snprintf(dest, sizeof(dest), "%s/%s", app_dir, name);
+    snprintf(tmp, sizeof(tmp), "%s.new", dest);
+    mkdir_p(dest);
+    int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if(out < 0) { snprintf(err, err_size, "cannot write %s: %s", dest, strerror(errno)); goto done; }
+    uLong crc_now = crc32(0, Z_NULL, 0);
+    int ok = 1;
+    if(method == 0) {
+      ok = write(out, z + data, csize) == (ssize_t)csize;
+      crc_now = crc32(crc_now, z + data, csize);
+    } else {
+      z_stream zs;
+      memset(&zs, 0, sizeof(zs));
+      if(inflateInit2(&zs, -15) != Z_OK) ok = 0;
+      else {
+        zs.next_in = z + data;
+        zs.avail_in = csize;
+        int r;
+        do {
+          zs.next_out = iobuf;
+          zs.avail_out = sizeof(iobuf);
+          r = inflate(&zs, Z_NO_FLUSH);
+          size_t got = sizeof(iobuf) - zs.avail_out;
+          if(got) {
+            crc_now = crc32(crc_now, iobuf, (uInt)got);
+            if(write(out, iobuf, got) != (ssize_t)got) { ok = 0; break; }
+          }
+        } while(r == Z_OK);
+        if(r != Z_STREAM_END) ok = 0;
+        if(zs.total_out != usize) ok = 0;
+        inflateEnd(&zs);
+      }
+    }
+    int werr = errno;
+    if(ok) fsync(out);
+    close(out);
+    if(!ok || (uint32_t)crc_now != crc) {
+      unlink(tmp);
+      snprintf(err, err_size, "cannot write %s: %s", dest, ok ? "checksum mismatch" : strerror(werr));
+      goto done;
+    }
+    if(rename(tmp, dest) != 0) {
+      snprintf(err, err_size, "cannot replace %s: %s", dest, strerror(errno));
+      unlink(tmp);
+      goto done;
+    }
+  }
+  rc = 0;
+done:
+  free(z);
+  return rc;
+}
+
 static int
 do_install(void) {
   if(do_check() != 0) return -1;
@@ -437,9 +557,10 @@ do_install(void) {
     fail("the release has no SHA256SUMS");
     return -1;
   }
-  char elf_hash[65], app_hash[65];
+  char elf_hash[65], app_hash[65], zip_hash[65];
   int have_elf = sums_lookup(sums.data, ELF_FILE, elf_hash) == 0;
   int have_app = sums_lookup(sums.data, APP_FILE, app_hash) == 0;
+  int have_zip = sums_lookup(sums.data, ZIP_FILE, zip_hash) == 0;
   free(sums.data);
   if(!have_elf || !have_app) { fail("release assets are missing"); return -1; }
 
@@ -523,8 +644,24 @@ do_install(void) {
   pthread_mutex_unlock(&st.mutex);
 
   if(folder_copy) {
+    /* App run from a folder (ShadowMount+ on /data/homebrew): replace its
+     * files from the release zip. The payload is already saved above, so a
+     * failure here only means the interface itself must be updated by hand. */
+    char zip_part[400], zerr[240] = "app zip missing in the release";
+    snprintf(zip_part, sizeof(zip_part), "%s/" ZIP_FILE ".part", DATA_DIR);
+    int zrc = -1;
+    if(have_zip && free_space_ok(DATA_DIR, 80LL << 20) &&
+       download_verified(tag, ZIP_FILE, zip_hash, zip_part, MAX_ZIP) == 0) {
+      set_phase("installing");
+      char folder_root[320];
+      snprintf(folder_root, sizeof(folder_root), "%s", app_dir);
+      zrc = extract_app_zip(zip_part, folder_root, zerr, sizeof(zerr));
+      unlink(zip_part);
+    }
+    if(zrc != 0) gc_log("update: app folder not updated: %s", zerr);
     pthread_mutex_lock(&st.mutex);
-    snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-copy");
+    if(zrc != 0 && st.error[0]) st.error[0] = 0;
+    snprintf(st.app_status, sizeof(st.app_status), "%s", zrc == 0 ? "folder-updated" : "folder-copy");
     st.app_path[0] = 0;
     pthread_mutex_unlock(&st.mutex);
   } else {
