@@ -93,3 +93,17 @@ program that only talks to it over HTTP.
 Build: `make -C tv-app GC_PAYLOAD=../game-compressor.elf ffpkg` (clang-18, .NET 8
 for the UFS2 image). CI publishes `PPSA99290.ffpkg` and `PPSA99290-app.zip`.
 Status: compiles and signs here; **not yet tested on a console**.
+
+## Self-update
+
+The payload checks the project's GitHub releases (`/api/gc/update`, implemented in
+`src/gc_update.c` with libcurl/OpenSSL built by `tools/build-tls-deps.sh`). Every
+release carries `build-info.json` (`{"build": <CI run number>, ...}`) and `SHA256SUMS`.
+When a newer build exists it downloads `game-compressor.elf` and `PPSA99290.ffpkg`,
+verifies both against `SHA256SUMS` (plus ELF header / UFS2 magic), saves the ELF to
+`/data/game-compressor/` and replaces the installed `PPSA99290.ffpkg` atomically
+(a folder copy is never touched). The TV app then restarts the payload from the new
+ELF (the payload's existing hand-off takes over the port); the new app image is used
+the next time the app is opened. The TV app's Settings screen shows the state and can
+disable automatic updates. The check uses the latest stable release, or the newest
+release of any kind when none is stable yet.
