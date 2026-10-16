@@ -468,6 +468,14 @@ copy_over(const char *src, const char *dest) {
 }
 
 
+/* Errors that usually go away on their own: the drive is busy, waking up, or
+ * the app still holds a file. The update is then retried in the background. */
+static int
+transient_errno(int e) {
+  return e == ENXIO || e == EBUSY || e == ETXTBSY || e == ENODEV || e == EIO || e == EACCES ||
+         e == EPERM || e == EROFS || e == ENOENT || e == EAGAIN || e == EINTR;
+}
+
 static void
 mkdir_p(char *path) {
   for(char *c = path + 1; *c; c++) {
@@ -559,7 +567,11 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
     mkdir_p(dest);
     if(file_crc_matches(dest, usize, crc)) { if(same) (*same)++; continue; } /* already up to date */
     int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if(out < 0) { snprintf(err, err_size, "cannot write %s: %s", dest, strerror(errno)); goto done; }
+    if(out < 0) {
+      snprintf(err, err_size, "cannot write %s: %s", dest, strerror(errno));
+      rc = transient_errno(errno) ? 1 : -1;
+      goto done;
+    }
     uLong crc_now = crc32(0, Z_NULL, 0);
     int ok = 1;
     if(method == 0) {
@@ -589,11 +601,13 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
       }
     }
     int werr = errno;
-    if(ok) fsync(out);
-    close(out);
+    if(ok && fsync(out) != 0 && transient_errno(errno)) { ok = 0; werr = errno; }
+    if(close(out) != 0 && ok && transient_errno(errno)) { ok = 0; werr = errno; }
     if(!ok || (uint32_t)crc_now != crc) {
       unlink(tmp);
       snprintf(err, err_size, "cannot write %s: %s", dest, ok ? "checksum mismatch" : strerror(werr));
+      /* A device that went away or is busy is worth retrying later. */
+      rc = (!ok && transient_errno(werr)) ? 1 : -1;
       goto done;
     }
     if(rename(tmp, dest) != 0) {
@@ -693,9 +707,10 @@ static int pending_running;
 static void *
 pending_worker(void *arg) {
   (void)arg;
+  int finished = 0;
   for(int attempt = 0; attempt < 900; attempt++) { /* about an hour */
     sleep(4);
-    if(access(PENDING_ZIP, F_OK) != 0) break;
+    if(access(PENDING_ZIP, F_OK) != 0) { finished = 1; break; }
     char updated[300], err[240] = "", info[120];
     int r = apply_zip_everywhere(PENDING_ZIP, updated, sizeof(updated), err, sizeof(err), info,
                                  sizeof(info));
@@ -712,8 +727,10 @@ pending_worker(void *arg) {
       note_set("failed: %s", err);
     }
     unlink(PENDING_ZIP);
+    finished = 1;
     break;
   }
+  if(!finished) note_set("gave up waiting; run the update again (the files stayed busy or the drive failed)");
   pthread_mutex_lock(&pending_lock);
   pending_running = 0;
   pthread_mutex_unlock(&pending_lock);
