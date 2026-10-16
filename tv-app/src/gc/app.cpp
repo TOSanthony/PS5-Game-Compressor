@@ -6,6 +6,7 @@
 // the controller hints at the bottom.
 
 #include "gc/app.hpp"
+#include "gc/i18n.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -25,17 +26,17 @@ constexpr float kListBottom = 880.0f;
 std::string size_text(std::int64_t bytes, bool pending = false, bool estimated = false)
 {
     if (pending && bytes <= 0)
-        return "Measuring...";
+        return tr("Measuring...");
     if (estimated && bytes > 0)
         return "~" + size_text(bytes);
     char text[32];
     const double value = static_cast<double>(bytes);
     if (bytes >= (1ll << 30))
-        std::snprintf(text, sizeof(text), "%.1f GB", value / static_cast<double>(1ll << 30));
+        std::snprintf(text, sizeof(text), i18n::french() ? "%.1f Go" : "%.1f GB", value / static_cast<double>(1ll << 30));
     else if (bytes >= (1ll << 20))
-        std::snprintf(text, sizeof(text), "%.0f MB", value / static_cast<double>(1ll << 20));
+        std::snprintf(text, sizeof(text), i18n::french() ? "%.0f Mo" : "%.0f MB", value / static_cast<double>(1ll << 20));
     else
-        std::snprintf(text, sizeof(text), "%lld B", static_cast<long long>(bytes));
+        std::snprintf(text, sizeof(text), i18n::french() ? "%lld o" : "%lld B", static_cast<long long>(bytes));
     return text;
 }
 
@@ -75,8 +76,8 @@ std::string kind_text(const Game &game)
     if (game.source_kind == "compressed")
         return "FFPFSC";
     if (game.source_kind == "image")
-        return "Image";
-    return "Unavailable";
+        return tr("Image");
+    return tr("Unavailable");
 }
 
 } // namespace
@@ -84,51 +85,52 @@ std::string kind_text(const Game &game)
 std::vector<App::Item> App::main_menu(const Game &game) const
 {
     std::vector<Item> items;
-    const auto add = [&](const char *label, const char *path, bool danger = false,
+    const auto add = [&](const std::string &label, const char *path, bool danger = false,
                          Item::Next next = Item::Next::run, std::string extra = {})
     { items.push_back({label, path, std::move(extra), danger, next}); };
     if (game.source_kind == "folder")
     {
-        add("Compress...", "/api/gc/compress", false, Item::Next::form_compress);
-        add("Make image...", "/api/gc/make-image", false, Item::Next::form_make_image);
+        add(tr("Compress..."), "/api/gc/compress", false, Item::Next::form_compress);
+        add(tr("Make image..."), "/api/gc/make-image", false, Item::Next::form_make_image);
     }
     else if (game.source_kind == "compressed")
     {
-        add("Validate and repair", "/api/gc/validate-repair");
-        add("Validate only", "/api/gc/validate-only");
-        add("Uncompress...", "/api/gc/uncompress", false, Item::Next::form_uncompress);
+        add(tr("Validate and repair"), "/api/gc/validate-repair");
+        add(tr("Validate only"), "/api/gc/validate-only");
+        add(tr("Uncompress..."), "/api/gc/uncompress", false, Item::Next::form_uncompress);
     }
     else if (game.source_kind == "image")
     {
-        add("Compress...", "/api/gc/compress", false, Item::Next::form_compress);
-        add("Set read-only", "/api/gc/set-read-only");
+        add(tr("Compress..."), "/api/gc/compress", false, Item::Next::form_compress);
+        add(tr("Set read-only"), "/api/gc/set-read-only");
         if (game.is_mounted)
-            add("Extract to folder", "/api/gc/extract-image");
+            add(tr("Extract to folder"), "/api/gc/extract-image");
     }
     else
         return items;
-    add("Read speed test", "/api/gc/read-speed-test");
+    add(tr("Read speed test"), "/api/gc/read-speed-test");
     if (game.ampr_present)
     {
         if (game.ampr_update_needed && !game.ampr_latest_version.empty() &&
             game.ampr_latest_sha256.size() == 64)
         {
-            items.push_back({"Update AMPR to " + game.ampr_latest_version, "/api/gc/update-ampr",
+            items.push_back({tr("Update AMPR to {version}", {{"version", game.ampr_latest_version}}),
+                             "/api/gc/update-ampr",
                              "&version=" + game.ampr_latest_version +
                                  "&sha256=" + game.ampr_latest_sha256 + "&intent=manual",
                              false, Item::Next::run});
         }
-        add("Choose AMPR version...", "", false, Item::Next::ampr);
+        add(tr("Choose AMPR version..."), "", false, Item::Next::ampr);
         if (game.ampr_original_available)
-            add("Restore original AMPR", "/api/gc/restore-ampr-original");
-        add("Build AMPR index", "/api/gc/build-ampr-index");
+            add(tr("Restore original AMPR"), "/api/gc/restore-ampr-original");
+        add(tr("Build AMPR index"), "/api/gc/build-ampr-index");
     }
     if (game.can_move_to_usb || game.can_move_to_internal)
     {
-        add("Copy to...", "", false, Item::Next::copy);
-        add("Move to...", "", false, Item::Next::move);
+        add(tr("Copy to..."), "", false, Item::Next::copy);
+        add(tr("Move to..."), "", false, Item::Next::move);
     }
-    add("Delete game data", "", true, Item::Next::confirm_delete);
+    add(tr("Delete game data"), "", true, Item::Next::confirm_delete);
     return items;
 }
 
@@ -139,18 +141,18 @@ std::vector<App::Item> App::ampr_menu(const Game &game) const
     {
         std::string label = entry.version;
         if (entry.version == game.ampr_version)
-            label += "  (installed)";
+            label = tr("{version}  (installed)", {{"version", entry.version}});
         else if (entry.version == game.ampr_latest_version)
-            label += "  (latest)";
+            label = tr("{version}  (latest)", {{"version", entry.version}});
         items.push_back({label, "/api/gc/update-ampr",
                          "&version=" + entry.version + "&sha256=" + entry.sha256 +
                              "&intent=manual",
                          false, Item::Next::run});
     }
     if (items.empty())
-        items.push_back({"No AMPR build cached yet (open the web interface once)", "", {}, false,
+        items.push_back({tr("No AMPR build cached yet (open the web interface once)"), "", {}, false,
                          Item::Next::close});
-    items.push_back({"Back", "", {}, false, Item::Next::close});
+    items.push_back({tr("Back"), "", {}, false, Item::Next::close});
     return items;
 }
 
@@ -162,12 +164,12 @@ App::Form App::build_form(const Game &game, Item::Next kind) const
     if (kind == Item::Next::form_uncompress)
     {
         form.path = "/api/gc/uncompress";
-        form.label = "Uncompress";
-        form.rows.push_back({"Output", {"App folder", "Image"}, {"app", "image"}, 0});
-        FormRow where{"Destination", {"In place"}, {"inplace"}, 0};
+        form.label = tr("Uncompress");
+        form.rows.push_back({tr("Output"), {tr("App folder"), tr("Image")}, {"app", "image"}, 0});
+        FormRow where{tr("Destination"), {tr("In place")}, {"inplace"}, 0};
         if (game.can_move_to_internal)
         {
-            where.names.push_back("Internal storage");
+            where.names.push_back(tr("Internal storage"));
             where.values.push_back("internal");
         }
         if (game.can_move_to_usb)
@@ -178,25 +180,25 @@ App::Form App::build_form(const Game &game, Item::Next kind) const
             }
         form.rows.push_back(where);
         form.rows.push_back(
-            {"Compressed file", {"Delete after", "Keep"}, {"after", "keep"}, 0});
+            {tr("Compressed file"), {tr("Delete after"), tr("Keep")}, {"after", "keep"}, 0});
         return form;
     }
     const bool make = kind == Item::Next::form_make_image;
     form.path = make ? "/api/gc/make-image" : "/api/gc/compress";
-    form.label = make ? "Make image" : "Compress";
-    form.rows.push_back(make ? FormRow{"Format", {"exFAT", "FFPFSC"}, {"exfat", "pfs"}, 0}
-                             : FormRow{"Format", {"FFPFSC", "exFAT"}, {"pfs", "exfat"}, 0});
-    FormRow source{"Original data", {"Delete after", "Keep"}, {"after", "keep"}, 0};
+    form.label = make ? tr("Make image") : tr("Compress");
+    form.rows.push_back(make ? FormRow{tr("Format"), {"exFAT", "FFPFSC"}, {"exfat", "pfs"}, 0}
+                             : FormRow{tr("Format"), {"FFPFSC", "exFAT"}, {"pfs", "exfat"}, 0});
+    FormRow source{tr("Original data"), {tr("Delete after"), tr("Keep")}, {"after", "keep"}, 0};
     if (game.can_stream_delete && !make)
     {
-        source.names.push_back("Delete while working (risky)");
+        source.names.push_back(tr("Delete while working (risky)"));
         source.values.push_back("stream");
     }
     form.rows.push_back(source);
-    FormRow where{"Result goes to", {"Same place"}, {"keep"}, 0};
+    FormRow where{tr("Result goes to"), {tr("Same place")}, {"keep"}, 0};
     if (game.can_move_to_internal)
     {
-        where.names.push_back("Internal storage");
+        where.names.push_back(tr("Internal storage"));
         where.values.push_back("internal");
     }
     if (game.can_move_to_usb)
@@ -243,7 +245,7 @@ void App::submit_form(const Game &game)
     }
     if (state_.job.busy)
     {
-        notice_ = "Another job is running. Wait or cancel it with Square.";
+        notice_ = tr("Another job is running. Wait or cancel it with Square.");
         notice_left_ = 5.0f;
         return;
     }
@@ -254,18 +256,19 @@ std::vector<App::Item> App::target_menu(const Game &game, bool copy) const
 {
     std::vector<Item> items;
     if (game.can_move_to_internal)
-        items.push_back({"Internal storage",
+        items.push_back({tr("Internal storage"),
                          copy ? "/api/gc/copy-to-internal" : "/api/gc/move-to-internal",
                          {}, false, Item::Next::run});
     if (game.can_move_to_usb)
     {
         for (const Target &target : state_.targets)
-            items.push_back({(target.name.empty() ? target.id : target.name) + "  (" +
-                                 size_text(target.free_bytes) + " free)",
+            items.push_back({tr("{name}  ({free} free)",
+                                 {{"name", target.name.empty() ? target.id : target.name},
+                                  {"free", size_text(target.free_bytes)}}),
                              copy ? "/api/gc/copy-to-usb" : "/api/gc/move-to-usb",
                              "&usbId=" + target.id, false, Item::Next::run});
     }
-    items.push_back({"Back", "", {}, false, Item::Next::close});
+    items.push_back({tr("Back"), "", {}, false, Item::Next::close});
     return items;
 }
 
@@ -274,62 +277,60 @@ std::vector<App::SettingsRow> App::settings_rows() const
     using Kind = SettingsRow::Kind;
     const UpdateInfo &u = state_.update;
     std::vector<SettingsRow> rows;
-    SettingsRow update{Kind::update, "Check for updates", ""};
-    char text[96];
+    SettingsRow update{Kind::update, tr("Check for updates"), ""};
     if (!u.known)
-        update.value = "Payload not reachable";
+        update.value = tr("Payload not reachable");
     else if (u.phase == "unsupported")
     {
-        update.label = "Payload outdated";
-        update.value = "restarting it from this app's copy...";
+        update.label = tr("Payload outdated");
+        update.value = tr("restarting it from this app's copy...");
     }
     else if (u.phase == "checking")
     {
-        update.label = "Checking for updates...";
+        update.label = tr("Checking for updates...");
     }
     else if (u.phase == "available")
     {
-        update.label = "Install update";
-        std::snprintf(text, sizeof(text), "build %lld available (installed: %lld)",
-                      static_cast<long long>(u.latest_build),
-                      static_cast<long long>(u.current_build));
-        update.value = text;
+        update.label = tr("Install update");
+        update.value = tr("build {latest} available (installed: {current})",
+                          {{"latest", std::to_string(u.latest_build)},
+                           {"current", std::to_string(u.current_build)}});
     }
     else if (u.phase == "downloading" || u.phase == "verifying" || u.phase == "installing")
     {
-        update.label = u.phase == "downloading" ? "Downloading " + u.file
-                       : u.phase == "verifying" ? "Verifying..."
-                                                : "Installing...";
+        update.label = u.phase == "downloading" ? tr("Downloading {file}", {{"file", u.file}})
+                       : u.phase == "verifying" ? tr("Verifying...")
+                                                : tr("Installing...");
         if (u.total > 0)
         {
-            std::snprintf(text, sizeof(text), "%d%%", static_cast<int>(100 * u.received / u.total));
-            update.value = text;
+            update.value = std::to_string(static_cast<int>(100 * u.received / u.total)) + "%";
         }
     }
     else if (u.phase == "installed")
     {
-        update.label = "Update installed";
-        update.value = u.app_status == "folder-copy" ? "app folder copy: update by hand"
-                                                     : "reopen the app";
+        update.label = tr("Update installed");
+        update.value = u.app_status == "folder-copy" ? tr("app folder copy: update by hand")
+                                                     : tr("reopen the app");
     }
     else if (u.phase == "uptodate")
     {
-        std::snprintf(text, sizeof(text), "Up to date (build %lld)",
-                      static_cast<long long>(u.current_build));
-        update.value = text;
+        update.value = tr("Up to date (build {build})", {{"build", std::to_string(u.current_build)}});
     }
     else if (u.phase == "error")
         update.value = u.error;
     else
     {
-        std::snprintf(text, sizeof(text), "build %lld", static_cast<long long>(u.current_build));
-        update.value = text;
+        update.value = tr("build {build}", {{"build", std::to_string(u.current_build)}});
     }
     rows.push_back(update);
-    rows.push_back({Kind::auto_update, "Automatic updates", state_.auto_update ? "On" : "Off"});
-    rows.push_back({Kind::restart, "Restart the Game Compressor payload", ""});
-    rows.push_back({Kind::refresh, "Refresh the game list", ""});
-    rows.push_back({Kind::browser, "Open the web interface", "system browser"});
+    rows.push_back({Kind::auto_update, tr("Automatic updates"), state_.auto_update ? tr("On") : tr("Off")});
+    rows.push_back({Kind::language, tr("Language"),
+                    state_.language == 2   ? "Français"
+                    : state_.language == 1 ? "English"
+                                           : tr("Automatic")});
+    rows.push_back({Kind::restart, tr("Restart the Game Compressor payload"), ""});
+    rows.push_back({Kind::refresh, tr("Refresh the game list"), ""});
+    rows.push_back({Kind::browser, tr("Open the web interface"), tr("system browser")});
     return rows;
 }
 
@@ -365,16 +366,19 @@ void App::update_settings(const hui::InputFrame &input)
     case Kind::auto_update:
         context_.store.set_auto_update(!state_.auto_update);
         break;
+    case Kind::language:
+        context_.store.set_language((state_.language + 1) % 3);
+        break;
     case Kind::restart:
         if (state_.job.busy)
         {
-            notice_ = "A job is running: wait for it to finish first.";
+            notice_ = tr("A job is running: wait for it to finish first.");
             notice_left_ = 5.0f;
         }
         else
         {
             context_.store.request(Verb::restart_payload, nullptr);
-            notice_ = "Restarting the payload...";
+            notice_ = tr("Restarting the payload...");
             notice_left_ = 4.0f;
         }
         break;
@@ -394,6 +398,7 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
     using hui::Direction;
     clock_ += dt;
     state_ = context_.store.snapshot();
+    i18n::set_language(static_cast<i18n::Language>(state_.language));
     if (!state_.message.empty() && state_.message != last_message_)
     {
         last_message_ = state_.message;
@@ -484,15 +489,15 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
             case Item::Next::copy:
             case Item::Next::move:
                 menu_ = target_menu(game, item.next == Item::Next::copy);
-                menu_title_ = item.next == Item::Next::copy ? "Copy to" : "Move to";
+                menu_title_ = item.next == Item::Next::copy ? tr("Copy to") : tr("Move to");
                 submenu_ = true;
                 menu_index_ = 0;
                 break;
             case Item::Next::confirm_delete:
-                menu_ = {{"Keep the game", "", {}, false, Item::Next::close},
+                menu_ = {{tr("Keep the game"), "", {}, false, Item::Next::close},
                          {"Yes, delete game data", "/api/gc/delete-game-data", {}, true,
                           Item::Next::run}};
-                menu_title_ = "Delete " + game.name + "?";
+                menu_title_ = tr("Delete {name}?", {{"name", game.name}});
                 submenu_ = true;
                 menu_index_ = 0;
                 break;
@@ -505,7 +510,7 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
                 break;
             case Item::Next::ampr:
                 menu_ = ampr_menu(game);
-                menu_title_ = "AMPR version";
+                menu_title_ = tr("AMPR version");
                 submenu_ = true;
                 menu_index_ = 0;
                 break;
@@ -518,7 +523,7 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
             case Item::Next::run:
                 if (state_.job.busy)
                 {
-                    notice_ = "Another job is running. Wait or cancel it with Square.";
+                    notice_ = tr("Another job is running. Wait or cancel it with Square.");
                     notice_left_ = 5.0f;
                 }
                 else
@@ -553,7 +558,7 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
         }
         else
         {
-            notice_ = "This entry can't be processed from here.";
+            notice_ = tr("This entry can't be processed from here.");
             notice_left_ = 4.0f;
         }
     }
@@ -628,37 +633,37 @@ void App::draw(Frame &frame)
     std::snprintf(sub, sizeof(sub), "v%s", context_.app_version.c_str());
     ui::text(list, type.regular, sub, kGutter + 560.0f, 118.0f, 24.0f, color::text3);
 
-    const char *status = state_.link == Link::online     ? "Connected"
-                         : state_.link == Link::starting ? "Starting the payload..."
-                                                         : "Payload not running";
+    const std::string status = state_.link == Link::online     ? tr("Connected")
+                         : state_.link == Link::starting ? tr("Starting the payload...")
+                                                         : tr("Payload not running");
     ui::text(list, type.medium, status, 1920.0f - kGutter, 112.0f, 26.0f,
          state_.link == Link::online ? color::text2 : color::text3, Align::right);
 
     if (state_.update.phase == "available" && state_.update.available)
-        ui::text(list, type.regular, "Update available - press Options", 1920.0f - kGutter, 148.0f,
+        ui::text(list, type.regular, tr("Update available - press Options"), 1920.0f - kGutter, 148.0f,
                  20.0f, color::text2, Align::right);
     else if (state_.update.phase == "installed")
-        ui::text(list, type.regular, "Update installed - reopen the app", 1920.0f - kGutter, 148.0f,
+        ui::text(list, type.regular, tr("Update installed - reopen the app"), 1920.0f - kGutter, 148.0f,
                  20.0f, color::text2, Align::right);
 
     const int count = static_cast<int>(state_.games.size());
     if (state_.link != Link::online || !state_.games_loaded || count == 0)
     {
-        const char *line1 = "Loading games...";
-        const char *line2 = "";
+        std::string line1 = tr("Loading games...");
+        std::string line2;
         if (state_.link == Link::offline)
         {
-            line1 = "The Game Compressor payload is not running.";
-            line2 = "Make sure the jailbreak and its ELF loader (port 9021) are active, then retry.";
+            line1 = tr("The Game Compressor payload is not running.");
+            line2 = tr("Make sure the jailbreak and its ELF loader (port 9021) are active, then retry.");
         }
         else if (state_.link == Link::starting)
         {
-            line1 = "Starting Game Compressor...";
+            line1 = tr("Starting Game Compressor...");
         }
         else if (state_.games_loaded)
         {
-            line1 = "No game found.";
-            line2 = "Press Options to refresh.";
+            line1 = tr("No game found.");
+            line2 = tr("Press the touchpad to refresh.");
         }
         ui::text(list, type.light, line1, 960.0f, 520.0f, 44.0f, color::text, Align::center);
         ui::text(list, type.regular, line2, 960.0f, 580.0f, 26.0f, color::text3, Align::center);
@@ -702,22 +707,38 @@ void App::draw(Frame &frame)
                                 panel.y + 84.0f, 34.0f, panel.w - 72.0f - icon_box.w - 28.0f, 42.0f,
                                 color::text, 3);
         y = std::max(y, icon_box.y + icon_box.h) + 52.0f;
-        const auto line = [&](const char *label, const std::string &value)
+        enum class Glyph { tag, cube, drive, ruler, compress, download, shield };
+        const auto line = [&](Glyph glyph, const std::string &label, const std::string &value)
         {
-            ui::text(list, type.regular, label, panel.x + 36.0f, y, 20.0f, color::text3);
-            text_fit(list, type.medium, value.empty() ? "-" : value, panel.x + 36.0f + 190.0f, y,
-                     22.0f, panel.w - 36.0f - 190.0f - 24.0f, color::text);
+            const float cx = panel.x + 36.0f + 20.0f;
+            const float cy = y - 7.0f;
+            list.circle(cx, cy, 21.0f, color::field_open);
+            switch (glyph)
+            {
+            case Glyph::tag: icon_tag(list, cx, cy, 24.0f, color::text2); break;
+            case Glyph::cube: icon_cube(list, cx, cy, 26.0f, color::text2); break;
+            case Glyph::drive: icon_drive(list, cx, cy, 26.0f, color::text2); break;
+            case Glyph::ruler: icon_ruler(list, cx, cy, 26.0f, color::text2); break;
+            case Glyph::compress: icon_compress(list, cx, cy, 26.0f, color::text2); break;
+            case Glyph::download: icon_download(list, cx, cy, 24.0f, color::text2); break;
+            case Glyph::shield: icon_shield(list, cx, cy, 26.0f, color::text2); break;
+            }
+            const float label_x = panel.x + 36.0f + 58.0f;
+            ui::text(list, type.regular, label, label_x, y, 20.0f, color::text3);
+            text_fit(list, type.medium, value.empty() ? "-" : value, label_x + 178.0f, y, 22.0f,
+                     panel.w - 36.0f - 58.0f - 178.0f - 24.0f, color::text);
             y += 46.0f;
         };
-        line("Title ID", game.title_id);
-        line("Type", kind_text(game));
-        line("Storage", game.storage);
-        line("Size", size_text(game.source_size, game.size_pending, game.size_estimated));
+        line(Glyph::tag, tr("Title ID"), game.title_id);
+        line(Glyph::cube, tr("Type"), kind_text(game));
+        line(Glyph::drive, tr("Storage"), tr(game.storage));
+        line(Glyph::ruler, tr("Size"),
+             size_text(game.source_size, game.size_pending, game.size_estimated));
         if (game.compressed_size > 0)
-            line("Compressed", size_text(game.compressed_size));
+            line(Glyph::compress, tr("Compressed"), size_text(game.compressed_size));
         if (game.saved_bytes > 0)
-            line("Saved", size_text(game.saved_bytes));
-        line("Validation", game.validation);
+            line(Glyph::download, tr("Saved"), size_text(game.saved_bytes));
+        line(Glyph::shield, tr("Validation"), tr(game.validation));
         text_fit(list, type.regular, game.source_path, panel.x + 36.0f, panel.y + panel.h - 30.0f,
                  17.0f, panel.w - 72.0f, color::text3);
     }
@@ -726,7 +747,7 @@ void App::draw(Frame &frame)
     if (state_.job.busy)
     {
         const Rect bar{kGutter, 910.0f, 1920.0f - 2.0f * kGutter, 14.0f};
-        std::string label = state_.job.verb.empty() ? std::string("Working") : state_.job.verb;
+        std::string label = state_.job.verb.empty() ? tr("Working") : state_.job.verb;
         if (!state_.job.current.empty())
             label += ": " + state_.job.current;
         if (!state_.job.phase.empty())
@@ -746,7 +767,7 @@ void App::draw(Frame &frame)
         text_fit(list, type.medium, notice_, 960.0f, 968.0f, 24.0f, 1700.0f, color::text2,
                  Align::center);
     if (browser_failed_)
-        ui::text(list, type.regular, "Couldn't open the system browser.", 960.0f, 1000.0f, 20.0f,
+        ui::text(list, type.regular, tr("Couldn't open the system browser."), 960.0f, 1000.0f, 20.0f,
              color::text3, Align::center);
 
     // Action menu.
@@ -804,7 +825,7 @@ void App::draw(Frame &frame)
         }
         const Rect start{box.x + 300.0f, box.y + 130.0f + static_cast<float>(rows) * 78.0f + 8.0f,
                          box.w - 600.0f, kButtonHeight};
-        button(over, type, start, "Start", ButtonKind::primary,
+        button(over, type, start, tr("Start"), ButtonKind::primary,
                form_index_ == rows ? 1.0f : 0.0f, true, 24.0f);
     }
 
@@ -813,30 +834,37 @@ void App::draw(Frame &frame)
 
     using hui::ui::Button;
     std::vector<hui::ui::Hint> hint_list;
+    std::vector<std::string> hint_text;
+    hint_text.reserve(8);
+    const auto hint = [&](Button button, const char *english)
+    {
+        hint_text.push_back(tr(english));
+        hint_list.push_back({button, hint_text.back().c_str()});
+    };
     if (mode_ == Mode::form)
     {
-        hint_list.push_back({Button::cross, "Change / Start"});
-        hint_list.push_back({Button::circle, "Back"});
+        hint(Button::cross, "Change / Start");
+        hint(Button::circle, "Back");
     }
     else if (mode_ == Mode::settings)
     {
-        hint_list.push_back({Button::cross, "Select"});
-        hint_list.push_back({Button::circle, "Back"});
+        hint(Button::cross, "Select");
+        hint(Button::circle, "Back");
     }
     else if (mode_ == Mode::menu)
     {
-        hint_list.push_back({Button::cross, "Select"});
-        hint_list.push_back({Button::circle, "Back"});
+        hint(Button::cross, "Select");
+        hint(Button::circle, "Back");
     }
     else
     {
-        hint_list.push_back({Button::cross, "Actions"});
-        hint_list.push_back({Button::triangle, "Web interface"});
-        hint_list.push_back({Button::options, "Settings"});
-        hint_list.push_back({Button::touchpad, "Refresh"});
+        hint(Button::cross, "Actions");
+        hint(Button::triangle, "Web interface");
+        hint(Button::options, "Settings");
+        hint(Button::touchpad, "Refresh");
     }
     if (state_.job.busy)
-        hint_list.push_back({Button::square, "Cancel job"});
+        hint(Button::square, "Cancel job");
     hints(frame.overlay, type, hint_list);
 }
 
@@ -846,7 +874,7 @@ void App::draw_settings(Frame &frame)
     const Type &type = context_.type;
     DrawList &over = frame.overlay;
     over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.97f));
-    ui::text(over, type.light, "Settings", kGutter, 118.0f, 64.0f, color::text);
+    ui::text(over, type.light, tr("Settings"), kGutter, 118.0f, 64.0f, color::text);
     const std::vector<SettingsRow> rows = settings_rows();
     const float x = 360.0f;
     const float w = 1200.0f;
@@ -869,21 +897,21 @@ void App::draw_settings(Frame &frame)
                      static_cast<float>(u.received) / static_cast<float>(u.total), color::action);
     }
     const float y = 210.0f + static_cast<float>(rows.size()) * 92.0f + 70.0f;
-    char line[200];
-    std::snprintf(line, sizeof(line), "TV app %s   -   payload %s (build %lld)",
-                  context_.app_version.c_str(),
-                  u.current_version.empty() ? "?" : u.current_version.c_str(),
-                  static_cast<long long>(u.current_build));
-    ui::text(over, type.regular, line, x, y, 20.0f, color::text3);
+    ui::text(over, type.regular,
+             tr("TV app {app}   -   payload {payload} (build {build})",
+                {{"app", context_.app_version},
+                 {"payload", u.current_version.empty() ? std::string("?") : u.current_version},
+                 {"build", std::to_string(u.current_build)}}),
+             x, y, 20.0f, color::text3);
     if (!u.latest_version.empty())
     {
-        std::snprintf(line, sizeof(line), "Latest release: %s (build %lld)", u.latest_version.c_str(),
-                      static_cast<long long>(u.latest_build));
-        ui::text(over, type.regular, line, x, y + 34.0f, 20.0f, color::text3);
+        ui::text(over, type.regular,
+                 tr("Latest release: {version} (build {build})",
+                    {{"version", u.latest_version}, {"build", std::to_string(u.latest_build)}}),
+                 x, y + 34.0f, 20.0f, color::text3);
     }
     ui::text(over, type.regular,
-             "Updates come from the project's GitHub releases. The app image is replaced in place; "
-             "reopen the app afterwards.",
+             tr("Updates come from the project's GitHub releases. The app image is replaced in place; reopen the app afterwards."),
              x, y + 76.0f, 18.0f, color::text3);
 }
 

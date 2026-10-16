@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "gc/starter.hpp"
+#include "gc/i18n.hpp"
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -192,14 +193,14 @@ Outcome send(const std::string &path, std::uint16_t port, int timeout_ms, std::s
     const int file = open(path.c_str(), O_RDONLY);
     if (file < 0)
     {
-        *error = "Could not read " + path;
+        *error = tr("Could not read {path}.", {{"path", path}});
         return Outcome::no_payload;
     }
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
     {
         close(file);
-        *error = std::string("Could not open a connection on this console.");
+        *error = tr("Could not open a connection on this console.");
         return Outcome::failed;
     }
     timeval timeout{};
@@ -220,8 +221,9 @@ Outcome send(const std::string &path, std::uint16_t port, int timeout_ms, std::s
         const bool refused = errno == ECONNREFUSED;
         close(fd);
         close(file);
-        *error = (refused ? "No ELF loader is listening on port " : "Could not reach the ELF loader on port ") +
-                 std::to_string(port);
+        *error = tr(refused ? "No ELF loader is listening on port {port}."
+                                : "Could not reach the ELF loader on port {port}.",
+                   {{"port", std::to_string(port)}});
         return refused ? Outcome::no_loader : Outcome::failed;
     }
 
@@ -234,7 +236,7 @@ Outcome send(const std::string &path, std::uint16_t port, int timeout_ms, std::s
             continue;
         if (got < 0)
         {
-            *error = "Could not read " + path;
+            *error = tr("Could not read {path}.", {{"path", path}});
             outcome = Outcome::failed;
             break;
         }
@@ -252,7 +254,7 @@ Outcome send(const std::string &path, std::uint16_t port, int timeout_ms, std::s
                 continue;
             if (n <= 0)
             {
-                *error = std::string("The ELF loader stopped taking Game Compressor part way.");
+                *error = tr("The ELF loader stopped taking Game Compressor part way.");
                 outcome = Outcome::failed;
                 break;
             }
@@ -289,7 +291,7 @@ Result LoaderStarter::start()
     if (payload.path.empty())
     {
         result.outcome = Outcome::no_payload;
-        result.detail = std::string("No copy of Game Compressor was found to start.");
+        result.detail = tr("No copy of Game Compressor was found to start.");
     }
     else
     {
@@ -297,10 +299,9 @@ Result LoaderStarter::start()
         std::string error;
         result.outcome = send(payload.path, port_, 10000, &error);
         result.detail = result.outcome == Outcome::sent
-                            ? "Sent Game Compressor " +
-                                  (payload.version.empty() ? std::string("(version unknown)")
-                                                           : payload.version) +
-                                  " to the ELF loader."
+                            ? tr("Sent Game Compressor {version} to the ELF loader.",
+                                 {{"version", payload.version.empty() ? tr("(version unknown)")
+                                                                      : payload.version}})
                             : error;
     }
     if (log_)

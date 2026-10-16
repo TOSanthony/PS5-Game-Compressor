@@ -105,6 +105,7 @@ class App
         {
             update,
             auto_update,
+            language,
             restart,
             refresh,
             browser,

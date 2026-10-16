@@ -11,6 +11,7 @@
 #include "core/version.hpp"
 #include "gc/app.hpp"
 #include "gc/http.hpp"
+#include "gc/i18n.hpp"
 #include "gc/starter.hpp"
 #include "gc/store.hpp"
 #include "gc/ui.hpp"
@@ -28,6 +29,7 @@
 #include <string>
 
 extern "C" int sceSystemServiceLaunchWebBrowser(const char *uri, void *parameters);
+extern "C" int sceSystemServiceParamGetInt(int param_id, int *value);
 
 namespace
 {
@@ -95,6 +97,12 @@ int main()
     pad.open();
     pad.set_light_bar(0x2a, 0x9d, 0xf4);
     InputTracker tracker;
+
+    // The console's own language (SCE_SYSTEM_SERVICE_PARAM_ID_LANG is 1); English if unknown.
+    int system_language = 1;
+    if (sceSystemServiceParamGetInt(1, &system_language) != 0)
+        system_language = 1;
+    gc::i18n::set_system_language(system_language);
 
     gc::http::SocketTransport transport(kBackend, kPort);
     gc::starter::LoaderStarter starter({}, gc::starter::LoaderStarter::kLoaderPort,

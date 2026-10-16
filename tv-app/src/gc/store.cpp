@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "gc/store.hpp"
+#include "gc/i18n.hpp"
 #include "gc/json.hpp"
 
 extern "C"
@@ -379,26 +380,45 @@ void Store::load_settings()
     close(fd);
     if (n <= 0)
         return;
+    const std::string conf(text);
     Lock lock(mutex_);
-    state_.auto_update = std::string(text).find("auto_update=0") == std::string::npos;
+    state_.auto_update = conf.find("auto_update=0") == std::string::npos;
+    state_.language = conf.find("language=fr") != std::string::npos   ? 2
+                      : conf.find("language=en") != std::string::npos ? 1
+                                                                      : 0;
 }
 
 void Store::save_settings()
 {
     bool on;
+    int language;
     {
         Lock lock(mutex_);
         on = state_.auto_update;
+        language = state_.language;
     }
     mkdir(kSettingsDir, 0755);
     const int fd = open(kSettingsFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if (fd < 0)
         return;
-    const char *line = on ? "auto_update=1\n" : "auto_update=0\n";
-    if (write(fd, line, 14) < 0)
+    const std::string line = std::string(on ? "auto_update=1\n" : "auto_update=0\n") +
+                             (language == 2   ? "language=fr\n"
+                              : language == 1 ? "language=en\n"
+                                              : "language=auto\n");
+    if (write(fd, line.data(), line.size()) < 0)
     {
     }
     close(fd);
+}
+
+void Store::set_language(int language)
+{
+    {
+        Lock lock(mutex_);
+        state_.language = language;
+        ++state_.version;
+    }
+    save_settings();
 }
 
 void Store::set_auto_update(bool on)
@@ -445,7 +465,7 @@ void Store::run_command(const Command &command)
         break;
     case Verb::cancel:
         request.path = "/api/gc/job/cancel";
-        label = "Cancel";
+        label = tr("Cancel");
         break;
     case Verb::compress:
         request.path = "/api/gc/compress";
@@ -469,9 +489,13 @@ void Store::run_command(const Command &command)
     if (reply.transported() && json::parse(reply.body, &doc))
         detail = doc.text("error");
     if (reply.transported() && reply.status >= 200 && reply.status < 300)
-        set_message(label + " started" + (command.name.empty() ? "" : ": " + command.name));
+        set_message(command.name.empty()
+                        ? tr("{action} started", {{"action", label}})
+                        : tr("{action} started: {name}", {{"action", label}, {"name", command.name}}));
     else
-        set_message(label + " refused" + (detail.empty() ? "" : ": " + detail));
+        set_message(detail.empty() ? tr("{action} refused", {{"action", label}})
+                                   : tr("{action} refused: {reason}",
+                                        {{"action", label}, {"reason", detail}}));
     poll_job();
 }
 
@@ -512,8 +536,8 @@ void Store::update_logic(bool alive)
             update_checked_ = false;
             starter::Result result = starter_ ? starter_->start() : starter::Result{};
             set_message(result.outcome == starter::Outcome::sent
-                            ? "Restarted the payload with the version bundled in this app."
-                            : "The running payload is outdated: " + result.detail);
+                            ? tr("Restarted the payload with the version bundled in this app.")
+                            : tr("The running payload is outdated: {detail}", {{"detail", result.detail}}));
             return;
         }
     }
@@ -541,7 +565,7 @@ void Store::update_logic(bool alive)
         request.path = "/api/gc/update/install";
         transport_.send(request);
         poll_update();
-        set_message("Updating Game Compressor to build " + std::to_string(info.latest_build) + "...");
+        set_message(tr("Updating Game Compressor to build {build}...", {{"build", std::to_string(info.latest_build)}}));
         return;
     }
     if (info.phase == "installed" && info.elf_saved && restarted_build_ != info.latest_build)
@@ -556,10 +580,10 @@ void Store::update_logic(bool alive)
         std::string text;
         if (info.phase == "installed")
         {
-            text = "Updated to build " + std::to_string(info.latest_build) +
-                   (info.app_status == "folder-copy"
-                        ? ". The app folder copy was not changed: update it by hand."
-                        : ". Close and reopen the app to use the new interface.");
+            text = tr(info.app_status == "folder-copy"
+                          ? "Updated to build {build}. The app folder copy was not changed: update it by hand."
+                          : "Updated to build {build}. Close and reopen the app to use the new interface.",
+                      {{"build", std::to_string(info.latest_build)}});
         }
         else
         {

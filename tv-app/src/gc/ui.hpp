@@ -152,6 +152,13 @@ void icon_chevron(DrawList &list, float cx, float cy, float size, Color ink, boo
 void icon_back(DrawList &list, float cx, float cy, float size, Color ink);
 void icon_heart(DrawList &list, float cx, float cy, float size, Color ink);
 void icon_layers(DrawList &list, float cx, float cy, float size, Color ink);
+// Game Compressor's detail rows.
+void icon_tag(DrawList &list, float cx, float cy, float size, Color ink);      // title id: #
+void icon_cube(DrawList &list, float cx, float cy, float size, Color ink);     // type: a box
+void icon_drive(DrawList &list, float cx, float cy, float size, Color ink);    // storage
+void icon_ruler(DrawList &list, float cx, float cy, float size, Color ink);    // size: <->
+void icon_compress(DrawList &list, float cx, float cy, float size, Color ink); // -> <-
+void icon_shield(DrawList &list, float cx, float cy, float size, Color ink);   // validation
 
 // A hint row in the bottom-right corner, drawn as the browser's footer.
 void hints(DrawList &list, const Type &type, const std::vector<hui::ui::Hint> &items);

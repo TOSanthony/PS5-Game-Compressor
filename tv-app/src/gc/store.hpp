@@ -125,6 +125,7 @@ struct Snapshot
     std::vector<AmprVersion> ampr_versions; // cached AMPR builds
     UpdateInfo update;
     bool auto_update = true;
+    int language = 0; // i18n::Language: 0 automatic, 1 English, 2 French
     Job job;
     std::string message; // last action result or start problem
     std::uint64_t version = 0; // bumps whenever the snapshot changes
@@ -156,6 +157,7 @@ class Store
     // Queues an action; game may be null for cancel / refresh.
     void request(Verb verb, const Game *game);
     void set_auto_update(bool on);
+    void set_language(int language);
     // Game icons: want_icon() queues the fetch; take_icon() hands the decoded pixels over once.
     void want_icon(const std::string &title_id);
     bool take_icon(const std::string &title_id, IconPixels *out);

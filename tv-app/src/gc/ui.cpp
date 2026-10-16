@@ -318,6 +318,82 @@ void icon_layers(DrawList &list, float cx, float cy, float size, Color ink)
     list.line(cx, cy + h * 2.0f, cx + w, cy + h * 1.0f, t, ink);
 }
 
+void icon_tag(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    const float a = size * 0.12f;
+    const float b = size * 0.33f;
+    list.line(cx - a, cy - b, cx - a, cy + b, t, ink);
+    list.line(cx + a, cy - b, cx + a, cy + b, t, ink);
+    list.line(cx - b, cy - a, cx + b, cy - a, t, ink);
+    list.line(cx - b, cy + a, cx + b, cy + a, t, ink);
+}
+
+void icon_cube(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    const float w = size * 0.34f;
+    const float h = size * 0.2f;
+    const float top = size * 0.4f;
+    const float xs[6] = {cx, cx + w, cx + w, cx, cx - w, cx - w};
+    const float ys[6] = {cy - top, cy - h, cy + h, cy + top, cy + h, cy - h};
+    for (int i = 0; i < 6; ++i)
+        list.line(xs[i], ys[i], xs[(i + 1) % 6], ys[(i + 1) % 6], t, ink);
+    list.line(cx, cy, cx - w, cy - h, t, ink);
+    list.line(cx, cy, cx + w, cy - h, t, ink);
+    list.line(cx, cy, cx, cy + top, t, ink);
+}
+
+void icon_drive(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    list.bordered_rect({cx - size * 0.4f, cy - size * 0.2f, size * 0.8f, size * 0.4f}, size * 0.08f,
+                       Color{0, 0, 0, 0}, t, ink);
+    list.line(cx - size * 0.4f, cy + size * 0.02f, cx + size * 0.4f, cy + size * 0.02f, t * 0.8f, ink);
+    list.circle(cx + size * 0.24f, cy + size * 0.11f, size * 0.035f, ink);
+    list.circle(cx + size * 0.12f, cy + size * 0.11f, size * 0.035f, ink);
+}
+
+void icon_ruler(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    const float w = size * 0.4f;
+    const float k = size * 0.12f;
+    list.line(cx - w, cy, cx + w, cy, t, ink);
+    list.line(cx - w, cy - size * 0.2f, cx - w, cy + size * 0.2f, t, ink);
+    list.line(cx + w, cy - size * 0.2f, cx + w, cy + size * 0.2f, t, ink);
+    list.line(cx - w + k, cy - k, cx - w, cy, t, ink);
+    list.line(cx - w + k, cy + k, cx - w, cy, t, ink);
+    list.line(cx + w - k, cy - k, cx + w, cy, t, ink);
+    list.line(cx + w - k, cy + k, cx + w, cy, t, ink);
+}
+
+void icon_compress(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    const float k = size * 0.12f;
+    const float far = size * 0.42f;
+    const float near = size * 0.08f;
+    list.line(cx - far, cy, cx - near, cy, t, ink);
+    list.line(cx - near - k, cy - k, cx - near, cy, t, ink);
+    list.line(cx - near - k, cy + k, cx - near, cy, t, ink);
+    list.line(cx + far, cy, cx + near, cy, t, ink);
+    list.line(cx + near + k, cy - k, cx + near, cy, t, ink);
+    list.line(cx + near + k, cy + k, cx + near, cy, t, ink);
+}
+
+void icon_shield(DrawList &list, float cx, float cy, float size, Color ink)
+{
+    const float t = std::max(1.8f, size * 0.08f);
+    const float w = size * 0.32f;
+    const float xs[6] = {cx, cx + w, cx + w, cx, cx - w, cx - w};
+    const float ys[6] = {cy - size * 0.4f, cy - size * 0.28f, cy + size * 0.04f,
+                         cy + size * 0.4f, cy + size * 0.04f, cy - size * 0.28f};
+    for (int i = 0; i < 6; ++i)
+        list.line(xs[i], ys[i], xs[(i + 1) % 6], ys[(i + 1) % 6], t, ink);
+    icon_check(list, cx, cy - size * 0.02f, size * 0.46f, ink, t);
+}
+
 void icon_search(DrawList &list, float cx, float cy, float size, Color ink)
 {
     const float radius = size * 0.32f;
