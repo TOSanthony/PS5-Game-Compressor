@@ -140,7 +140,9 @@ jobs:
             if [[ "$GITHUB_REF_NAME" != main ]]; then
               branch="${GITHUB_REF_NAME//[^A-Za-z0-9._-]/-}"
               tag="${tag}-${branch}"
-              create_args+=(--prerelease)
+              # Marked "latest" (not a pre-release) so the in-app updater can
+              # use the stable releases/latest/download/ alias.
+              create_args+=(--latest)
             fi
           fi
 

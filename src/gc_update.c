@@ -33,6 +33,7 @@
 
 #define REPO "TOSanthony/PS5-Game-Compressor"
 #define API_LATEST "https://api.github.com/repos/" REPO "/releases/latest"
+#define LATEST_BASE "https://github.com/" REPO "/releases/latest/download/"
 #define ATOM_FEED "https://github.com/" REPO "/releases.atom"
 #define API_NEWEST "https://api.github.com/repos/" REPO "/releases?per_page=1"
 #define DOWNLOAD_BASE "https://github.com/" REPO "/releases/download/"
@@ -92,6 +93,7 @@ static int
 url_allowed(const char *url) {
   return !strncmp(url, API_BASE, strlen(API_BASE)) ||
          !strcmp(url, ATOM_FEED) ||
+         !strncmp(url, LATEST_BASE, strlen(LATEST_BASE)) ||
          !strncmp(url, DOWNLOAD_BASE, strlen(DOWNLOAD_BASE));
 }
 
@@ -233,7 +235,8 @@ json_find(const char *json, const char *key, char *out, size_t out_size) {
 
 static void
 build_url(char *out, size_t size, const char *tag, const char *name) {
-  snprintf(out, size, DOWNLOAD_BASE "%s/%s", tag, name);
+  if(!strcmp(tag, "latest")) snprintf(out, size, LATEST_BASE "%s", name);
+  else snprintf(out, size, DOWNLOAD_BASE "%s/%s", tag, name);
 }
 
 static int
@@ -242,9 +245,23 @@ do_check(void) {
   char tag[96] = {0};
   int ok = 0;
   sink_t sink = {.fd = -1, .limit = 1 << 20};
+  /* 0. the "latest" release alias on github.com: same host as the downloads,
+   *    no API, no rate limit. */
+  {
+    char probe_url[300];
+    char probe_err[200];
+    sink_t probe = {.fd = -1, .limit = 16384};
+    build_url(probe_url, sizeof(probe_url), "latest", "build-info.json");
+    if(http_get(probe_url, &probe, probe_err, sizeof(probe_err)) == 0 && probe.data &&
+       strstr(probe.data, "\"build\"")) {
+      snprintf(tag, sizeof(tag), "latest");
+      ok = 1;
+    }
+    free(probe.data);
+  }
   /* 1. newest release of any kind through the API (branch builds are
    *    pre-releases, so /releases/latest alone is not enough). */
-  if(http_get(API_NEWEST, &sink, err, sizeof(err)) == 0) {
+  if(!ok && http_get(API_NEWEST, &sink, err, sizeof(err)) == 0) {
     ok = sink.data && json_find(sink.data, "tag_name", tag, sizeof(tag)) == 0 && tag_safe(tag);
   }
   free(sink.data);
