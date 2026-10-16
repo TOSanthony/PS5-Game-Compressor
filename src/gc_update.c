@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -500,7 +501,8 @@ file_crc_matches(const char *path, uint32_t size, uint32_t crc) {
 /* Extracts the release zip (PPSA99290/...) into <app_dir>. Each file is
  * written under a temporary name and renamed into place. Returns 0 on success. */
 static int
-extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err_size) {
+extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err_size,
+                int *wrote, int *same) {
   int fd = open(zip_path, O_RDONLY);
   if(fd < 0) { snprintf(err, err_size, "cannot open %s: %s", zip_path, strerror(errno)); return -1; }
   off_t size = lseek(fd, 0, SEEK_END);
@@ -555,7 +557,7 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
     snprintf(dest, sizeof(dest), "%s/%s", app_dir, name);
     snprintf(tmp, sizeof(tmp), "%s.new", dest);
     mkdir_p(dest);
-    if(file_crc_matches(dest, usize, crc)) continue; /* already up to date */
+    if(file_crc_matches(dest, usize, crc)) { if(same) (*same)++; continue; } /* already up to date */
     int out = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
     if(out < 0) { snprintf(err, err_size, "cannot write %s: %s", dest, strerror(errno)); goto done; }
     uLong crc_now = crc32(0, Z_NULL, 0);
@@ -604,6 +606,7 @@ extract_app_zip(const char *zip_path, const char *app_dir, char *err, size_t err
         goto done;
       }
     }
+    if(wrote) (*wrote)++;
   }
   }
   rc = 0;
@@ -613,15 +616,42 @@ done:
   return rc;
 }
 
+#define NOTE_FILE DATA_DIR "/app-update.txt"
+
+/* One persistent line about the last app-files update (survives payload
+ * restarts); shown in the TV app's Settings. */
+static void
+note_set(const char *fmt, ...) {
+  char line[400];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(line, sizeof(line), fmt, ap);
+  va_end(ap);
+  char stamp[32] = "";
+  time_t now = time(NULL);
+  struct tm tm;
+  if(gmtime_r(&now, &tm)) strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M UTC", &tm);
+  char out[460];
+  int n = snprintf(out, sizeof(out), "%s - %s\n", stamp, line);
+  int fd = open(NOTE_FILE, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if(fd >= 0) {
+    if(n > 0 && write(fd, out, (size_t)n) < 0) { /* best effort */ }
+    close(fd);
+  }
+  gc_log("update note: %s", line);
+}
+
 #define PENDING_ZIP DATA_DIR "/pending-app.zip"
 
 /* Applies the zip to every app folder found. 0 ok, 1 busy (some file is in
  * use), -1 failed. updated lists the folders; err the last problem. */
 static int
 apply_zip_everywhere(const char *zip_path, char *updated, size_t updated_size, char *err,
-                     size_t err_size) {
-  int copies = 0, rc = 0;
+                     size_t err_size, char *info, size_t info_size) {
+  int copies = 0, rc = 0, wrote = 0, same = 0;
+  char param_version[40] = "?";
   updated[0] = 0;
+  info[0] = 0;
   for(int i = 0; k_app_dirs[i]; i++) {
     char probe[400];
     struct stat ps;
@@ -629,9 +659,17 @@ apply_zip_everywhere(const char *zip_path, char *updated, size_t updated_size, c
     if(stat(probe, &ps) != 0) continue;
     char root[320];
     snprintf(root, sizeof(root), "%s", k_app_dirs[i]);
-    int r = extract_app_zip(zip_path, root, err, err_size);
+    int r = extract_app_zip(zip_path, root, err, err_size, &wrote, &same);
     if(r == 0) {
       copies++;
+      snprintf(probe, sizeof(probe), "%s/PPSA99290/sce_sys/param.json", root);
+      int pfd = open(probe, O_RDONLY);
+      if(pfd >= 0) {
+        char pj[2048] = {0};
+        ssize_t pn = read(pfd, pj, sizeof(pj) - 1);
+        close(pfd);
+        if(pn > 0) json_find(pj, "contentVersion", param_version, sizeof(param_version));
+      }
       size_t len = strlen(updated);
       snprintf(updated + len, updated_size - len, "%s%s/PPSA99290", len ? ", " : "", k_app_dirs[i]);
       gc_log("update: app folder updated: %s", root);
@@ -644,6 +682,8 @@ apply_zip_everywhere(const char *zip_path, char *updated, size_t updated_size, c
     snprintf(err, err_size, "no app folder found");
     return -1;
   }
+  snprintf(info, info_size, "%d written, %d unchanged, param.json now %s", wrote, same,
+           param_version);
   return rc;
 }
 
@@ -656,17 +696,20 @@ pending_worker(void *arg) {
   for(int attempt = 0; attempt < 900; attempt++) { /* about an hour */
     sleep(4);
     if(access(PENDING_ZIP, F_OK) != 0) break;
-    char updated[300], err[240] = "";
-    int r = apply_zip_everywhere(PENDING_ZIP, updated, sizeof(updated), err, sizeof(err));
+    char updated[300], err[240] = "", info[120];
+    int r = apply_zip_everywhere(PENDING_ZIP, updated, sizeof(updated), err, sizeof(err), info,
+                                 sizeof(info));
     if(r == 1) continue; /* the app is still open */
     if(r == 0) {
       gc_log("update: pending app update applied: %s", updated);
+      note_set("applied after the app closed: %s (%s)", updated, info);
       pthread_mutex_lock(&st.mutex);
       snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-updated");
       snprintf(st.app_path, sizeof(st.app_path), "%s", updated);
       pthread_mutex_unlock(&st.mutex);
     } else {
       gc_log("update: pending app update failed: %s", err);
+      note_set("failed: %s", err);
     }
     unlink(PENDING_ZIP);
     break;
@@ -812,8 +855,12 @@ do_install(void) {
     if(have_zip && free_space_ok(DATA_DIR, 80LL << 20) &&
        download_verified(tag, ZIP_FILE, zip_hash, zip_part, MAX_ZIP) == 0) {
       set_phase("installing");
-      char updated[300] = "";
-      zrc = apply_zip_everywhere(zip_part, updated, sizeof(updated), zerr, sizeof(zerr));
+      char updated[300] = "", info[120] = "";
+      zrc = apply_zip_everywhere(zip_part, updated, sizeof(updated), zerr, sizeof(zerr), info,
+                                 sizeof(info));
+      if(zrc == 0) note_set("updated %s (%s)", updated, info);
+      else if(zrc == 1) note_set("waiting for the app to close: %s", zerr);
+      else note_set("failed: %s", zerr);
       snprintf(app_dir, sizeof(app_dir), "%s", updated);
       if(zrc == 1) {
         /* The running app keeps eboot.bin busy. Keep the zip and apply it as
@@ -919,8 +966,20 @@ start(int install) {
 
 int
 gc_update_status_request(const http_request_t *req) {
-  char tag[200], ver[140], err[560], path[620], file[100];
-  char body[2048];
+  char tag[200], ver[140], err[560], path[620], file[100], note[1000] = "";
+  char body[3072];
+  {
+    char raw[420] = {0};
+    int nfd = open(NOTE_FILE, O_RDONLY);
+    if(nfd >= 0) {
+      ssize_t rn = read(nfd, raw, sizeof(raw) - 1);
+      close(nfd);
+      if(rn > 0) {
+        for(char *c = raw; *c; c++) if(*c == '\n' || *c == '\r') *c = 0;
+        gc_json_escape_small(note, sizeof(note), raw);
+      }
+    }
+  }
   pthread_mutex_lock(&st.mutex);
   gc_json_escape_small(tag, sizeof(tag), st.tag);
   gc_json_escape_small(ver, sizeof(ver), st.latest_version);
@@ -932,13 +991,13 @@ gc_update_status_request(const http_request_t *req) {
     "\"currentBuild\":%d,\"currentVersion\":\"%s\","
     "\"latestBuild\":%ld,\"latestVersion\":\"%s\",\"tag\":\"%s\","
     "\"available\":%s,\"file\":\"%s\",\"received\":%lld,\"total\":%lld,"
-    "\"checkedAt\":%lld,\"appStatus\":\"%s\",\"appPath\":\"%s\",\"elfSaved\":%s}",
+    "\"checkedAt\":%lld,\"appStatus\":\"%s\",\"appPath\":\"%s\",\"elfSaved\":%s,\"appNote\":\"%s\"}",
     st.busy ? "true" : "false", st.phase, err, (int)GC_BUILD_NUMBER,
     GAME_COMPRESSOR_VERSION, st.latest_build, ver, tag,
     st.latest_build > GC_BUILD_NUMBER ? "true" : "false", file,
     (long long)st.received, (long long)st.total, (long long)st.checked_at,
     st.app_status[0] ? st.app_status : "none", path,
-    st.elf_saved ? "true" : "false");
+    st.elf_saved ? "true" : "false", note);
   pthread_mutex_unlock(&st.mutex);
   if(n < 0 || (size_t)n >= sizeof(body)) {
     return websrv_send_error_json(req->fd, 500, "status too large");

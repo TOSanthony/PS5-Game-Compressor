@@ -63,6 +63,7 @@ struct UpdateInfo
     std::string error;
     std::string current_version;
     std::string latest_version;
+    std::string app_note;   // persistent line about the last app-files update
     std::string app_path;   // folders that were updated (folder install)
     std::string app_status; // replaced created folder-copy none
     std::string file;

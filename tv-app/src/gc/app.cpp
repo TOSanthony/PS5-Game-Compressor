@@ -40,6 +40,19 @@ std::string size_text(std::int64_t bytes, bool pending = false, bool estimated =
     return text;
 }
 
+// "12.3 / 51.0 MB (24%)" while a download runs; "12.3 MB" if the size is unknown.
+std::string download_text(const UpdateInfo &u)
+{
+    char text[96];
+    const double mb = 1024.0 * 1024.0;
+    if (u.total > 0)
+        std::snprintf(text, sizeof(text), "%.1f / %.1f MB (%d%%)", static_cast<double>(u.received) / mb,
+                      static_cast<double>(u.total) / mb, static_cast<int>(100 * u.received / u.total));
+    else
+        std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(u.received) / mb);
+    return text;
+}
+
 bool ends_with_ci(const std::string &text, const char *suffix)
 {
     const std::string tail(suffix);
@@ -301,10 +314,8 @@ std::vector<App::SettingsRow> App::settings_rows() const
         update.label = u.phase == "downloading" ? tr("Downloading {file}", {{"file", u.file}})
                        : u.phase == "verifying" ? tr("Verifying...")
                                                 : tr("Installing...");
-        if (u.total > 0)
-        {
-            update.value = std::to_string(static_cast<int>(100 * u.received / u.total)) + "%";
-        }
+        if (u.phase == "downloading")
+            update.value = download_text(u);
     }
     else if (u.phase == "installed")
     {
@@ -668,7 +679,20 @@ void App::draw(Frame &frame)
         ui::text(list, type.medium, status, pill.x + 48.0f, pill.cy() + 8.0f, font_size, color::text2);
     }
 
-    if (state_.update.phase == "available" && state_.update.available)
+    if (state_.update.phase == "downloading" || state_.update.phase == "verifying" ||
+        state_.update.phase == "installing")
+    {
+        const UpdateInfo &u = state_.update;
+        const std::string line = u.phase == "downloading"
+                                     ? tr("Downloading {file}", {{"file", u.file}}) + "  " + download_text(u)
+                                 : u.phase == "verifying" ? tr("Verifying...")
+                                                          : tr("Installing...");
+        ui::text(list, type.regular, line, 1920.0f - kGutter, 152.0f, 20.0f, color::text2, Align::right);
+        progress_bar(list, {1920.0f - kGutter - 520.0f, 164.0f, 520.0f, 8.0f},
+                     u.total > 0 ? static_cast<float>(u.received) / static_cast<float>(u.total) : 0.0f,
+                     ui::accent());
+    }
+    else if (state_.update.phase == "available" && state_.update.available)
         ui::text(list, type.regular, tr("Update available - press Options"), 1920.0f - kGutter, 148.0f,
                  20.0f, color::text2, Align::right);
     else if (state_.update.phase == "installed")
@@ -942,10 +966,11 @@ void App::draw_settings(Frame &frame)
         }
     }
     const UpdateInfo &u = state_.update;
-    if ((u.phase == "downloading") && u.total > 0)
+    if (u.phase == "downloading")
     {
         progress_bar(over, {x, 210.0f + static_cast<float>(rows.size()) * 92.0f + 6.0f, w, 12.0f},
-                     static_cast<float>(u.received) / static_cast<float>(u.total), ui::accent());
+                     u.total > 0 ? static_cast<float>(u.received) / static_cast<float>(u.total) : 0.0f,
+                     ui::accent());
     }
     const float y = 210.0f + static_cast<float>(rows.size()) * 92.0f + 70.0f;
     ui::text(over, type.regular,
@@ -961,6 +986,9 @@ void App::draw_settings(Frame &frame)
                     {{"version", u.latest_version}, {"build", std::to_string(u.latest_build)}}),
                  x, y + 34.0f, 20.0f, color::text3);
     }
+    if (!u.app_note.empty())
+        ui::paragraph(over, type.regular, tr("App files: {note}", {{"note", u.app_note}}), x, y + 118.0f,
+                      18.0f, w, 26.0f, color::text2, 3);
     ui::text(over, type.regular,
              tr("Updates come from the project's GitHub releases. The app image is replaced in place; reopen the app afterwards."),
              x, y + 76.0f, 18.0f, color::text3);

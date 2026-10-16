@@ -352,6 +352,7 @@ bool Store::poll_update()
     info.latest_version = doc.text("latestVersion");
     info.app_status = doc.text("appStatus");
     info.app_path = doc.text("appPath");
+    info.app_note = doc.text("appNote");
     info.file = doc.text("file");
     info.current_build = static_cast<std::int64_t>(doc.number("currentBuild"));
     info.latest_build = static_cast<std::int64_t>(doc.number("latestBuild"));
