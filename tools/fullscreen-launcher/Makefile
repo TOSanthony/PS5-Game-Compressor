@@ -27,6 +27,14 @@ AUTHINFO := 00 00 00 00 00 00 00 00 00 00 00 00 00 1C 00 40 00 FF 00 00 00 00 \
             00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 \
             00 00 00 00
 
+# ffpkg (UFS2 image for ShadowMountPlus) holding the launcher application.
+# Needs makefs (Debian/Ubuntu: apt install makefs).
+APP_TITLE_ID ?= PSGC50002
+APP_DIR      := $(OUT)/app/$(APP_TITLE_ID)
+FFPKG        := $(OUT)/$(APP_TITLE_ID).ffpkg
+ICON         := ../../assets-app/icon0.png
+MAKEFS       ?= makefs
+
 all: $(OUT)/eboot.bin
 
 $(OUT):
@@ -45,7 +53,25 @@ $(OUT)/eboot.bin: $(OUT)/eboot.elf
 	    --app-version $(PS4_SDK_VERSION) \
 	    --fw-version $(PS4_SDK_VERSION) $< $@
 
+$(APP_DIR)/sce_sys/param.json: param.json.in | $(OUT)
+	mkdir -p $(dir $@)
+	sed 's/@TITLE_ID@/$(APP_TITLE_ID)/g' $< > $@
+
+$(APP_DIR)/sce_sys/icon0.png: $(ICON)
+	mkdir -p $(dir $@)
+	cp $< $@
+
+$(APP_DIR)/eboot.bin: $(OUT)/eboot.bin
+	mkdir -p $(APP_DIR)
+	cp $< $@
+
+ffpkg: $(FFPKG)
+
+$(FFPKG): $(APP_DIR)/eboot.bin $(APP_DIR)/sce_sys/param.json $(APP_DIR)/sce_sys/icon0.png
+	rm -f $@
+	$(MAKEFS) -t ffs -M 8m -o version=2,bsize=32768,fsize=4096 $@ $(APP_DIR)
+
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all clean
+.PHONY: all clean ffpkg

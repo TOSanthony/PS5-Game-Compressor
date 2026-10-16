@@ -1,0 +1,13 @@
+{
+  "applicationCategoryType": 0,
+  "titleId": "@TITLE_ID@",
+  "localizedParameters": {
+    "defaultLanguage": "en-US",
+    "en-US": {
+      "titleName": "Game Compressor Fullscreen"
+    },
+    "fr-FR": {
+      "titleName": "Game Compressor Plein ecran"
+    }
+  }
+}

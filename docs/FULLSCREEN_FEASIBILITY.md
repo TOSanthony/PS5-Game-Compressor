@@ -38,6 +38,14 @@ Packaging it as an ffpkg would only change how it is installed or mounted.
 - `tools/fullscreen-launcher/`: a freestanding, syscall-only `eboot.bin` that
   connects to `127.0.0.1:5910`, requests `/api/control/open-browser` and exits.
   It uses the linker script and `make_fself.py` from the SDK samples.
+- `make -C tools/fullscreen-launcher ffpkg`: packs the eboot as
+  `PSGC50002.ffpkg` (UFS2 image: `eboot.bin`, `sce_sys/param.json` and the
+  Game Compressor `sce_sys/icon0.png`). Needs `makefs` (`apt install makefs`).
+  The CI also publishes `PSGC50002-app.zip`, the same folder, to rebuild the
+  ffpkg with another tool (e.g. PSFFPKG / UFS2Tool: `newfs -O 2 -b 32768 -f 4096`).
+  The image is valid UFS2 (magic, 32768/4096 block and fragment sizes) but this
+  `makefs` stores the superblock at offset 8192 instead of 65536; whether the
+  PS5 mounts it is untested.
 
 ## Build
 
