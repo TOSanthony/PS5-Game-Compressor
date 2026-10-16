@@ -2,8 +2,8 @@ name: Build and release Game Compressor
 
 # Every push to any branch builds the ELF and publishes a GitHub release.
 #  - tag v*        -> release named after the tag (as before)
-#  - push to main  -> release "build-main-<run number>"
-#  - other branch  -> pre-release "build-<branch>-<run number>"
+#  - push to main  -> release "v<VERSION>.<run number>" (VERSION file, e.g. v1.1.37)
+#  - other branch  -> pre-release "v<VERSION>.<run number>-<branch>"
 # Pull requests only build and upload an artifact.
 
 on:
@@ -26,6 +26,19 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Compute the version (VERSION file + run number)
+        run: |
+          base="$(tr -d '[:space:]' < VERSION)"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            version="$GITHUB_REF_NAME"
+          else
+            version="v${base}.${GITHUB_RUN_NUMBER}"
+          fi
+          echo "GC_VERSION_TAG=$version" >> "$GITHUB_ENV"
+          echo "GC_BASE_MAJOR=${base%%.*}" >> "$GITHUB_ENV"
+          echo "GC_BASE_MINOR=${base#*.}" >> "$GITHUB_ENV"
+          echo "Version: $version"
 
       - name: Install build tools
         run: |
@@ -55,11 +68,7 @@ jobs:
       - name: Build ELF with firmware 13.60 support
         run: |
           python3 tools/check_sdk_fw1360.py "$PS5_PAYLOAD_SDK"
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            build_version="$GITHUB_REF_NAME"
-          else
-            build_version="$(git describe --tags --always --dirty)"
-          fi
+          build_version="$GC_VERSION_TAG"
           make -j"$(nproc)" BUILD_VERSION="$build_version" BUILD_NUMBER="$GITHUB_RUN_NUMBER"
           file game-compressor.elf
           readelf -h game-compressor.elf | grep -Eq 'Class:[[:space:]]+ELF64'
@@ -76,6 +85,10 @@ jobs:
 
       - name: Build full-screen app (PPSA99290)
         run: |
+          # The app's own version (shown in the app and on the console): 01.MMM.PPP.
+          content_version="$(printf '%02d.%03d.%03d' "$GC_BASE_MAJOR" "$GC_BASE_MINOR" "$((GITHUB_RUN_NUMBER % 1000))")"
+          sed -i "s/\"contentVersion\": \"[0-9.]*\"/\"contentVersion\": \"$content_version\"/" tv-app/sce_sys/param.json
+          grep contentVersion tv-app/sce_sys/param.json
           make -C tv-app GC_PAYLOAD=../game-compressor.elf GC_VERSION="$GITHUB_RUN_NUMBER" ffpkg
           cp tv-app/dist/PPSA99290.ffpkg PPSA99290.ffpkg
           cp tv-app/dist/PPSA99290.zip PPSA99290-app.zip
@@ -83,7 +96,7 @@ jobs:
       - name: Build info (read by the in-app updater)
         run: |
           printf '{"build": %s, "version": "%s", "commit": "%s"}\n' \
-            "$GITHUB_RUN_NUMBER" "$(git describe --tags --always)" "$GITHUB_SHA" > build-info.json
+            "$GITHUB_RUN_NUMBER" "$GC_VERSION_TAG" "$GITHUB_SHA" > build-info.json
           cat build-info.json
 
       - name: Checksums
@@ -121,10 +134,14 @@ jobs:
             tag="$GITHUB_REF_NAME"
             create_args=(--verify-tag)
           else
-            branch="${GITHUB_REF_NAME//[^A-Za-z0-9._-]/-}"
-            tag="build-${branch}-${GITHUB_RUN_NUMBER}"
+            # main: v1.1.<run>; other branches: v1.1.<run>-<branch> (pre-release).
+            tag="$GC_VERSION_TAG"
             create_args=(--target "$GITHUB_SHA")
-            [[ "$GITHUB_REF_NAME" == main ]] || create_args+=(--prerelease)
+            if [[ "$GITHUB_REF_NAME" != main ]]; then
+              branch="${GITHUB_REF_NAME//[^A-Za-z0-9._-]/-}"
+              tag="${tag}-${branch}"
+              create_args+=(--prerelease)
+            fi
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
