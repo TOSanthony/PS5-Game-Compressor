@@ -3,11 +3,78 @@
 
 #include "gc/ui.hpp"
 
+#include "ui/theme.hpp"
+
 #include <algorithm>
 #include <cmath>
 
 namespace gc::ui
 {
+
+namespace
+{
+std::vector<Skin> &skin_list()
+{
+    static std::vector<Skin> list = []
+    {
+        std::vector<Skin> out;
+        Skin night;
+        night.name = "Midnight";
+        night.backdrop.mode = hui::gfx::BackdropMode::gradient;
+        night.backdrop.colors[0] = Color::rgb(0x10131a);
+        night.backdrop.colors[1] = Color::rgb(0x030304);
+        night.backdrop.colors[2] = Color::rgb(0x1b2a4a);
+        night.backdrop.params[0] = 0.8f;
+        night.backdrop.params[1] = 0.0f;
+        night.backdrop.params[2] = 0.35f;
+        night.accent = Color::rgb(0x7aa7ff);
+        night.on_accent = Color::rgb(0x07101f);
+        out.push_back(night);
+        for (const hui::ui::Theme &theme : hui::ui::themes())
+        {
+            if (!theme.dark || theme.backdrop.mode == hui::gfx::BackdropMode::none)
+                continue;
+            Skin skin;
+            skin.name = theme.name;
+            skin.backdrop = theme.backdrop;
+            skin.accent = theme.primary;
+            skin.accent.a = 1.0f;
+            const float lum = 0.2126f * skin.accent.r + 0.7152f * skin.accent.g + 0.0722f * skin.accent.b;
+            skin.on_accent = lum > 0.5f ? Color::rgb(0x0a0a0a) : Color::rgb(0xffffff);
+            out.push_back(skin);
+        }
+        return out;
+    }();
+    return list;
+}
+int g_skin = 0;
+} // namespace
+
+int skin_count()
+{
+    return static_cast<int>(skin_list().size());
+}
+const Skin &skin_at(int index)
+{
+    const auto &list = skin_list();
+    return list[static_cast<std::size_t>(std::clamp(index, 0, static_cast<int>(list.size()) - 1))];
+}
+int skin_index(const std::string &name)
+{
+    const auto &list = skin_list();
+    for (std::size_t i = 0; i < list.size(); ++i)
+        if (list[i].name == name)
+            return static_cast<int>(i);
+    return 0;
+}
+void use_skin(int index)
+{
+    g_skin = std::clamp(index, 0, skin_count() - 1);
+}
+const Skin &skin()
+{
+    return skin_at(g_skin);
+}
 
 float text(DrawList &list, const hui::ui::FontRef &font, std::string_view value, float x,
            float baseline, float size, Color color, Align align)
@@ -45,7 +112,7 @@ void focus_ring(DrawList &list, const Rect &r, float radius, float amount)
     if (amount <= 0.01f)
         return;
     // The browser's --ring: 3 px of white hugging the shape, then the glow.
-    list.glow(r.inset(-4.0f), radius + 4.0f, 13.0f, Color::rgb(0xffffff, 0.33f * amount));
+    list.glow(r.inset(-4.0f), radius + 4.0f, 16.0f, accent().with_alpha(0.55f * amount));
     list.bordered_rect(r.inset(-3.0f), radius + 3.0f, Color{0, 0, 0, 0}, 3.0f,
                        Color::rgb(0xffffff, amount));
 }
@@ -70,8 +137,8 @@ void button(DrawList &list, const Type &type, const Rect &r, std::string_view la
     switch (kind)
     {
     case ButtonKind::primary:
-        fill = color::action;
-        ink = color::night1;
+        fill = accent();
+        ink = skin().on_accent;
         break;
     case ButtonKind::light:
         fill = color::text;
@@ -87,7 +154,7 @@ void button(DrawList &list, const Type &type, const Rect &r, std::string_view la
     }
     if (!enabled)
     {
-        fill = kind == ButtonKind::primary ? color::action.with_alpha(0.4f)
+        fill = kind == ButtonKind::primary ? accent().with_alpha(0.4f)
                                            : Color::rgb(0xffffff, 0.04f);
         ink = color::text.with_alpha(0.4f);
     }
@@ -169,7 +236,11 @@ void progress_bar(DrawList &list, const Rect &r, float fraction, Color fill)
     fraction = std::clamp(fraction, 0.0f, 1.0f);
     list.rounded_rect(r, r.h * 0.5f, Color::rgb(0xffffff, 0.14f));
     if (fraction > 0.0f)
-        list.rounded_rect({r.x, r.y, std::max(r.h, r.w * fraction), r.h}, r.h * 0.5f, fill);
+    {
+        const Rect bar{r.x, r.y, std::max(r.h, r.w * fraction), r.h};
+        list.glow(bar, r.h * 0.5f, 10.0f, fill.with_alpha(0.35f));
+        list.gradient_rect_h(bar, r.h * 0.5f, fill, mix(fill, Color::rgb(0xffffff, fill.a), 0.35f));
+    }
 }
 
 void modal(DrawList &list, const Rect &r)

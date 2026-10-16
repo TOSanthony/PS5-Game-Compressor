@@ -328,6 +328,7 @@ std::vector<App::SettingsRow> App::settings_rows() const
                     state_.language == 2   ? "Français"
                     : state_.language == 1 ? "English"
                                            : tr("Automatic")});
+    rows.push_back({Kind::theme, tr("Theme"), state_.theme});
     rows.push_back({Kind::restart, tr("Restart the Game Compressor payload"), ""});
     rows.push_back({Kind::refresh, tr("Refresh the game list"), ""});
     rows.push_back({Kind::browser, tr("Open the web interface"), tr("system browser")});
@@ -351,6 +352,14 @@ void App::update_settings(const hui::InputFrame &input)
         --settings_index_;
     if (input.nav == Direction::down && settings_index_ < n - 1)
         ++settings_index_;
+    if (rows[static_cast<std::size_t>(settings_index_)].kind == Kind::theme &&
+        (input.nav == Direction::left || input.nav == Direction::right))
+    {
+        const int step = input.nav == Direction::left ? ui::skin_count() - 1 : 1;
+        context_.store.set_theme(
+            ui::skin_at((ui::skin_index(state_.theme) + step) % ui::skin_count()).name);
+        return;
+    }
     if (!input.is_pressed(Action::confirm))
         return;
     const UpdateInfo &u = state_.update;
@@ -368,6 +377,10 @@ void App::update_settings(const hui::InputFrame &input)
         break;
     case Kind::language:
         context_.store.set_language((state_.language + 1) % 3);
+        break;
+    case Kind::theme:
+        context_.store.set_theme(
+            ui::skin_at((ui::skin_index(state_.theme) + 1) % ui::skin_count()).name);
         break;
     case Kind::restart:
         if (state_.job.busy)
@@ -399,6 +412,7 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
     clock_ += dt;
     state_ = context_.store.snapshot();
     i18n::set_language(static_cast<i18n::Language>(state_.language));
+    ui::use_skin(ui::skin_index(state_.theme));
     if (!state_.message.empty() && state_.message != last_message_)
     {
         last_message_ = state_.message;
@@ -620,24 +634,38 @@ void App::draw(Frame &frame)
     const Type &type = context_.type;
     DrawList &list = frame.scene;
 
-    frame.backdrop.mode = hui::gfx::BackdropMode::gradient;
-    frame.backdrop.colors[0] = Color::rgb(0x10131a);
-    frame.backdrop.colors[1] = Color::rgb(0x030304);
-    frame.backdrop.colors[2] = Color::rgb(0x1b2a4a);
-    frame.backdrop.params[0] = 0.8f;
-    frame.backdrop.params[1] = 0.0f;
-    frame.backdrop.params[2] = 0.35f;
+    frame.backdrop = ui::skin().backdrop;
+    frame.backdrop.time = clock_;
 
-    ui::text(list, type.light, "Game Compressor", kGutter, 118.0f, 64.0f, color::text);
+    // Logo tile, title, version and a status pill.
+    {
+        const Rect logo{kGutter, 66.0f, 72.0f, 72.0f};
+        list.glow(logo, 20.0f, 18.0f, ui::accent().with_alpha(0.4f));
+        list.gradient_rect(logo, 20.0f, ui::accent(),
+                           hui::gfx::mix(ui::accent(), Color::rgb(0x000000, ui::accent().a), 0.4f));
+        icon_compress(list, logo.cx(), logo.cy(), 40.0f, ui::skin().on_accent);
+    }
+    const float title_x = kGutter + 100.0f;
+    ui::text(list, type.light, "Game Compressor", title_x, 118.0f, 60.0f, color::text);
     char sub[96];
     std::snprintf(sub, sizeof(sub), "v%s", context_.app_version.c_str());
-    ui::text(list, type.regular, sub, kGutter + 560.0f, 118.0f, 24.0f, color::text3);
+    ui::text(list, type.regular, sub, title_x + 540.0f, 118.0f, 24.0f, color::text3);
 
     const std::string status = state_.link == Link::online     ? tr("Connected")
                          : state_.link == Link::starting ? tr("Starting the payload...")
                                                          : tr("Payload not running");
-    ui::text(list, type.medium, status, 1920.0f - kGutter, 112.0f, 26.0f,
-         state_.link == Link::online ? color::text2 : color::text3, Align::right);
+    {
+        const Color dot = state_.link == Link::online     ? Color::rgb(0x3ddc84)
+                          : state_.link == Link::starting ? Color::rgb(0xffb020)
+                                                          : Color::rgb(0xff5d5d);
+        const float font_size = 24.0f;
+        const float w = ui::text(list, type.medium, status, 0.0f, -1000.0f, font_size, color::text2);
+        const Rect pill{1920.0f - kGutter - w - 64.0f, 76.0f, w + 64.0f, 50.0f};
+        surface(list, pill, 25.0f, color::field_open);
+        list.glow({pill.x + 22.0f, pill.cy() - 6.0f, 12.0f, 12.0f}, 6.0f, 8.0f, dot.with_alpha(0.55f));
+        list.circle(pill.x + 28.0f, pill.cy(), 6.0f, dot);
+        ui::text(list, type.medium, status, pill.x + 48.0f, pill.cy() + 8.0f, font_size, color::text2);
+    }
 
     if (state_.update.phase == "available" && state_.update.available)
         ui::text(list, type.regular, tr("Update available - press Options"), 1920.0f - kGutter, 148.0f,
@@ -682,12 +710,18 @@ void App::draw(Frame &frame)
             if (on)
                 focus_ring(list, row, 16.0f, 1.0f);
             surface(list, row, 16.0f, on ? color::field_open : color::field);
+            if (on)
+            {
+                list.gradient_rect_h(row, 16.0f, ui::accent().with_alpha(0.22f), ui::accent().with_alpha(0.0f));
+                list.rounded_rect({row.x + 10.0f, row.y + 16.0f, 5.0f, row.h - 32.0f}, 2.5f, ui::accent());
+            }
             text_fit(list, on ? type.semibold : type.medium, game.name, row.x + 28.0f,
                      row.y + 36.0f, 28.0f, 560.0f, color::text);
             ui::text(list, type.regular, game.title_id, row.x + 28.0f, row.y + 64.0f, 20.0f,
                  color::text3);
             chip(list, type, row.x + 640.0f, row.cy(), kind_text(game),
-                 color::field_open, color::text2, 18.0f);
+                 on ? ui::accent().with_alpha(0.28f) : color::field_open,
+                 on ? color::text : color::text2, 18.0f);
             ui::text(list, type.regular, size_text(game.source_size, game.size_pending, game.size_estimated), row.x + row.w - 24.0f,
                  row.cy() + 8.0f, 24.0f, color::text2, Align::right);
         }
@@ -696,6 +730,8 @@ void App::draw(Frame &frame)
         const Game &game = state_.games[static_cast<std::size_t>(selected_)];
         const Rect panel{1160.0f, kListY, 1920.0f - kGutter - 1160.0f, kListBottom - kListY};
         surface(list, panel, kPanelRadius, color::field);
+        list.gradient_rect(Rect{panel.x, panel.y, panel.w, 250.0f}, kPanelRadius,
+                           ui::accent().with_alpha(0.24f), ui::accent().with_alpha(0.0f));
         const Rect icon_box{panel.x + 36.0f, panel.y + 34.0f, 176.0f, 176.0f};
         const auto icon = icons_.find(game.title_id);
         if (icon != icons_.end() && icon->second.texture != 0)
@@ -712,7 +748,7 @@ void App::draw(Frame &frame)
         {
             const float cx = panel.x + 36.0f + 20.0f;
             const float cy = y - 7.0f;
-            list.circle(cx, cy, 21.0f, color::field_open);
+            list.circle(cx, cy, 21.0f, ui::accent().with_alpha(0.18f));
             switch (glyph)
             {
             case Glyph::tag: icon_tag(list, cx, cy, 24.0f, color::text2); break;
@@ -756,7 +792,7 @@ void App::draw(Frame &frame)
         char pct[16];
         std::snprintf(pct, sizeof(pct), "%d%%", static_cast<int>(state_.job.fraction() * 100.0f));
         ui::text(list, type.semibold, pct, 1920.0f - kGutter, 900.0f, 22.0f, color::text, Align::right);
-        progress_bar(list, bar, state_.job.fraction(), color::action);
+        progress_bar(list, bar, state_.job.fraction(), ui::accent());
     }
     else if (!state_.job.error.empty() && notice_left_ <= 0.0f)
     {
@@ -873,7 +909,7 @@ void App::draw_settings(Frame &frame)
     using namespace ui;
     const Type &type = context_.type;
     DrawList &over = frame.overlay;
-    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.97f));
+    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.72f));
     ui::text(over, type.light, tr("Settings"), kGutter, 118.0f, 64.0f, color::text);
     const std::vector<SettingsRow> rows = settings_rows();
     const float x = 360.0f;
@@ -887,14 +923,28 @@ void App::draw_settings(Frame &frame)
         surface(over, r, 18.0f, on ? color::field_open : color::field);
         text_fit(over, type.semibold, rows[i].label, r.x + 30.0f, r.cy() + 9.0f, 26.0f, 620.0f,
                  color::text);
-        text_fit(over, type.regular, rows[i].value, r.x + r.w - 30.0f, r.cy() + 8.0f, 22.0f, 480.0f,
-                 color::text2, Align::right);
+        if (on)
+        {
+            over.gradient_rect_h(r, 18.0f, ui::accent().with_alpha(0.2f), ui::accent().with_alpha(0.0f));
+            over.rounded_rect({r.x + 10.0f, r.y + 18.0f, 5.0f, r.h - 36.0f}, 2.5f, ui::accent());
+        }
+        float value_w = text_fit(over, type.regular, rows[i].value, r.x + r.w - 30.0f, r.cy() + 8.0f,
+                                 22.0f, 480.0f, color::text2, Align::right);
+        if (rows[i].kind == SettingsRow::Kind::theme)
+        {
+            const float sx = r.x + r.w - 30.0f - value_w - 30.0f;
+            over.glow({sx - 12.0f, r.cy() - 12.0f, 24.0f, 24.0f}, 12.0f, 10.0f, ui::accent().with_alpha(0.5f));
+            over.circle(sx, r.cy(), 12.0f, ui::accent());
+            if (on)
+                ui::text(over, type.regular, "<  >", sx - 40.0f, r.cy() + 8.0f, 22.0f, color::text3,
+                         Align::right);
+        }
     }
     const UpdateInfo &u = state_.update;
     if ((u.phase == "downloading") && u.total > 0)
     {
         progress_bar(over, {x, 210.0f + static_cast<float>(rows.size()) * 92.0f + 6.0f, w, 12.0f},
-                     static_cast<float>(u.received) / static_cast<float>(u.total), color::action);
+                     static_cast<float>(u.received) / static_cast<float>(u.total), ui::accent());
     }
     const float y = 210.0f + static_cast<float>(rows.size()) * 92.0f + 70.0f;
     ui::text(over, type.regular,

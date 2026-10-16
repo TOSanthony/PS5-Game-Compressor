@@ -106,6 +106,7 @@ class App
             update,
             auto_update,
             language,
+            theme,
             restart,
             refresh,
             browser,

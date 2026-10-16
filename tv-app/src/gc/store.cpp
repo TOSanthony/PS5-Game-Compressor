@@ -375,7 +375,7 @@ void Store::load_settings()
     const int fd = open(kSettingsFile, O_RDONLY);
     if (fd < 0)
         return;
-    char text[128] = {};
+    char text[384] = {};
     const ssize_t n = read(fd, text, sizeof(text) - 1);
     close(fd);
     if (n <= 0)
@@ -386,16 +386,26 @@ void Store::load_settings()
     state_.language = conf.find("language=fr") != std::string::npos   ? 2
                       : conf.find("language=en") != std::string::npos ? 1
                                                                       : 0;
+    const std::size_t at = conf.find("theme=");
+    if (at != std::string::npos)
+    {
+        const std::size_t end = conf.find('\n', at);
+        const std::string name = conf.substr(at + 6, end == std::string::npos ? std::string::npos : end - at - 6);
+        if (!name.empty())
+            state_.theme = name;
+    }
 }
 
 void Store::save_settings()
 {
     bool on;
     int language;
+    std::string theme;
     {
         Lock lock(mutex_);
         on = state_.auto_update;
         language = state_.language;
+        theme = state_.theme;
     }
     mkdir(kSettingsDir, 0755);
     const int fd = open(kSettingsFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
@@ -404,7 +414,8 @@ void Store::save_settings()
     const std::string line = std::string(on ? "auto_update=1\n" : "auto_update=0\n") +
                              (language == 2   ? "language=fr\n"
                               : language == 1 ? "language=en\n"
-                                              : "language=auto\n");
+                                              : "language=auto\n") +
+                             "theme=" + theme + "\n";
     if (write(fd, line.data(), line.size()) < 0)
     {
     }
@@ -416,6 +427,16 @@ void Store::set_language(int language)
     {
         Lock lock(mutex_);
         state_.language = language;
+        ++state_.version;
+    }
+    save_settings();
+}
+
+void Store::set_theme(const std::string &name)
+{
+    {
+        Lock lock(mutex_);
+        state_.theme = name;
         ++state_.version;
     }
     save_settings();

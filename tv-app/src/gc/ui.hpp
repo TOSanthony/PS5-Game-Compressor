@@ -52,6 +52,27 @@ inline const Color glass_on = Color::rgb(0x202020, 0.82f);
 inline const Color popover = Color::rgb(0x141414, 0.9f);
 } // namespace color
 
+// ---- skins: the background themes (the toolkit's own theme list) ----------
+// Each skin is an animated backdrop plus the accent colour that tints the
+// focus glow, primary buttons and progress bars. Index 0 is the app's own
+// black "Midnight"; the others are the toolkit's dark themes.
+struct Skin
+{
+    std::string name;
+    hui::gfx::BackdropSpec backdrop;
+    Color accent;
+    Color on_accent; // ink that reads on the accent
+};
+int skin_count();
+const Skin &skin_at(int index);
+int skin_index(const std::string &name); // 0 when unknown
+void use_skin(int index);
+const Skin &skin();
+inline Color accent()
+{
+    return skin().accent;
+}
+
 constexpr float kGutter = 100.0f;     // left and right page margin
 constexpr float kArtRadius = 14.0f;   // covers and art
 constexpr float kPanelRadius = 22.0f; // dialogs
