@@ -23,6 +23,9 @@
 
 #include <GL/glcorearb.h>
 
+#include <sys/mount.h>
+#include <sys/param.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <span>
@@ -113,6 +116,12 @@ int main()
 
     gc::Context context(type, fonts, store);
     context.app_version = read_content_version("/app0/sce_sys/param.json");
+    {
+        struct statfs fs;
+        if (statfs("/app0", &fs) == 0)
+            context.app_source = fs.f_mntfromname;
+        sys::log("[GC] app0 from=%s", context.app_source.c_str());
+    }
     context.open_browser = []
     { return sceSystemServiceLaunchWebBrowser(kBrowserUrl, nullptr) == 0; };
     context.make_texture = [&renderer](int w, int h, const std::uint8_t *rgba)

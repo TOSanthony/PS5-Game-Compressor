@@ -129,6 +129,7 @@ constexpr Entry kTable[] = {
     {"Off", "Désactivées"},
     {"Language", "Langue"},
     {"Theme", "Thème"},
+    {"Running from: {path}", "Lancée depuis : {path}"},
     {"App files: {note}", "Fichiers de l'app : {note}"},
     {"Automatic", "Automatique"},
     {"Restart the Game Compressor payload", "Redémarrer le payload Game Compressor"},

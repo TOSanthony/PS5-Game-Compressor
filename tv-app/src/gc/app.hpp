@@ -42,6 +42,7 @@ struct Context
     const hui::ui::Fonts &fonts;
     Store &store;
     std::string app_version;
+    std::string app_source; // where /app0 comes from (the mounted folder), for Settings
     // Uploads RGBA pixels as a texture (the renderer's batch); 0 on failure.
     std::function<std::uint32_t(int, int, const std::uint8_t *)> make_texture;
     std::function<bool()> open_browser; // the full web interface, in the system browser

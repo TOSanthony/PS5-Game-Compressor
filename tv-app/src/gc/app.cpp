@@ -938,7 +938,7 @@ void App::draw_settings(Frame &frame)
     const float w = 1200.0f;
     for (std::size_t i = 0; i < rows.size(); ++i)
     {
-        const Rect r{x, 210.0f + static_cast<float>(i) * 92.0f, w, 76.0f};
+        const Rect r{x, 176.0f + static_cast<float>(i) * 72.0f, w, 62.0f};
         const bool on = static_cast<int>(i) == settings_index_;
         if (on)
             focus_ring(over, r, 18.0f, 1.0f);
@@ -966,11 +966,11 @@ void App::draw_settings(Frame &frame)
     const UpdateInfo &u = state_.update;
     if (u.phase == "downloading")
     {
-        progress_bar(over, {x, 210.0f + static_cast<float>(rows.size()) * 92.0f + 6.0f, w, 12.0f},
+        progress_bar(over, {x, 176.0f + static_cast<float>(rows.size()) * 72.0f + 4.0f, w, 10.0f},
                      u.total > 0 ? static_cast<float>(u.received) / static_cast<float>(u.total) : 0.0f,
                      ui::accent());
     }
-    const float y = 210.0f + static_cast<float>(rows.size()) * 92.0f + 70.0f;
+    const float y = 176.0f + static_cast<float>(rows.size()) * 72.0f + 56.0f;
     ui::text(over, type.regular,
              tr("TV app {app}   -   payload {payload} (build {build})",
                 {{"app", context_.app_version},
@@ -984,8 +984,11 @@ void App::draw_settings(Frame &frame)
                     {{"version", u.latest_version}, {"build", std::to_string(u.latest_build)}}),
                  x, y + 34.0f, 20.0f, color::text3);
     }
+    if (!context_.app_source.empty())
+        ui::text_fit(over, type.regular, tr("Running from: {path}", {{"path", context_.app_source}}), x,
+                     y + 112.0f, 18.0f, w, color::text2);
     if (!u.app_note.empty())
-        ui::paragraph(over, type.regular, tr("App files: {note}", {{"note", u.app_note}}), x, y + 118.0f,
+        ui::paragraph(over, type.regular, tr("App files: {note}", {{"note", u.app_note}}), x, y + 146.0f,
                       18.0f, w, 26.0f, color::text2, 3);
     ui::text(over, type.regular,
              tr("Updates come from the project's GitHub releases. The app image is replaced in place; reopen the app afterwards."),
