@@ -53,15 +53,16 @@ inline const Color popover = Color::rgb(0x141414, 0.9f);
 } // namespace color
 
 // ---- skins: the background themes (the toolkit's own theme list) ----------
-// Each skin is an animated backdrop plus the accent colour that tints the
-// focus glow, primary buttons and progress bars. Index 0 is the app's own
+// Each skin is an animated backdrop; the interface colours stay the same
+// (white focus, white primary buttons) whatever the background. Index 0 is the app's own
 // black "Midnight"; the others are the toolkit's dark themes.
 struct Skin
 {
     std::string name;
     hui::gfx::BackdropSpec backdrop;
-    Color accent;
+    Color accent;    // always the storefront white: themes change only the background
     Color on_accent; // ink that reads on the accent
+    Color swatch;    // the theme's own colour, shown beside its name in Settings
 };
 int skin_count();
 const Skin &skin_at(int index);

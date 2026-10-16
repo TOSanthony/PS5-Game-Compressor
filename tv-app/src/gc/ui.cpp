@@ -27,8 +27,9 @@ std::vector<Skin> &skin_list()
         night.backdrop.params[0] = 0.8f;
         night.backdrop.params[1] = 0.0f;
         night.backdrop.params[2] = 0.35f;
-        night.accent = Color::rgb(0x7aa7ff);
-        night.on_accent = Color::rgb(0x07101f);
+        night.accent = Color::rgb(0xffffff);
+        night.on_accent = Color::rgb(0x080808);
+        night.swatch = Color::rgb(0x7aa7ff);
         out.push_back(night);
         for (const hui::ui::Theme &theme : hui::ui::themes())
         {
@@ -37,10 +38,10 @@ std::vector<Skin> &skin_list()
             Skin skin;
             skin.name = theme.name;
             skin.backdrop = theme.backdrop;
-            skin.accent = theme.primary;
-            skin.accent.a = 1.0f;
-            const float lum = 0.2126f * skin.accent.r + 0.7152f * skin.accent.g + 0.0722f * skin.accent.b;
-            skin.on_accent = lum > 0.5f ? Color::rgb(0x0a0a0a) : Color::rgb(0xffffff);
+            skin.accent = Color::rgb(0xffffff);
+            skin.on_accent = Color::rgb(0x080808);
+            skin.swatch = theme.primary;
+            skin.swatch.a = 1.0f;
             out.push_back(skin);
         }
         return out;
@@ -112,7 +113,7 @@ void focus_ring(DrawList &list, const Rect &r, float radius, float amount)
     if (amount <= 0.01f)
         return;
     // The browser's --ring: 3 px of white hugging the shape, then the glow.
-    list.glow(r.inset(-4.0f), radius + 4.0f, 16.0f, accent().with_alpha(0.55f * amount));
+    list.glow(r.inset(-4.0f), radius + 4.0f, 13.0f, Color::rgb(0xffffff, 0.33f * amount));
     list.bordered_rect(r.inset(-3.0f), radius + 3.0f, Color{0, 0, 0, 0}, 3.0f,
                        Color::rgb(0xffffff, amount));
 }
@@ -238,7 +239,6 @@ void progress_bar(DrawList &list, const Rect &r, float fraction, Color fill)
     if (fraction > 0.0f)
     {
         const Rect bar{r.x, r.y, std::max(r.h, r.w * fraction), r.h};
-        list.glow(bar, r.h * 0.5f, 10.0f, fill.with_alpha(0.35f));
         list.gradient_rect_h(bar, r.h * 0.5f, fill, mix(fill, Color::rgb(0xffffff, fill.a), 0.35f));
     }
 }

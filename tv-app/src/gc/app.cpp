@@ -712,7 +712,7 @@ void App::draw(Frame &frame)
             surface(list, row, 16.0f, on ? color::field_open : color::field);
             if (on)
             {
-                list.gradient_rect_h(row, 16.0f, ui::accent().with_alpha(0.22f), ui::accent().with_alpha(0.0f));
+                list.gradient_rect_h(row, 16.0f, ui::accent().with_alpha(0.10f), ui::accent().with_alpha(0.0f));
                 list.rounded_rect({row.x + 10.0f, row.y + 16.0f, 5.0f, row.h - 32.0f}, 2.5f, ui::accent());
             }
             text_fit(list, on ? type.semibold : type.medium, game.name, row.x + 28.0f,
@@ -720,8 +720,7 @@ void App::draw(Frame &frame)
             ui::text(list, type.regular, game.title_id, row.x + 28.0f, row.y + 64.0f, 20.0f,
                  color::text3);
             chip(list, type, row.x + 640.0f, row.cy(), kind_text(game),
-                 on ? ui::accent().with_alpha(0.28f) : color::field_open,
-                 on ? color::text : color::text2, 18.0f);
+                 color::field_open, color::text2, 18.0f);
             ui::text(list, type.regular, size_text(game.source_size, game.size_pending, game.size_estimated), row.x + row.w - 24.0f,
                  row.cy() + 8.0f, 24.0f, color::text2, Align::right);
         }
@@ -731,7 +730,7 @@ void App::draw(Frame &frame)
         const Rect panel{1160.0f, kListY, 1920.0f - kGutter - 1160.0f, kListBottom - kListY};
         surface(list, panel, kPanelRadius, color::field);
         list.gradient_rect(Rect{panel.x, panel.y, panel.w, 250.0f}, kPanelRadius,
-                           ui::accent().with_alpha(0.24f), ui::accent().with_alpha(0.0f));
+                           ui::accent().with_alpha(0.08f), ui::accent().with_alpha(0.0f));
         const Rect icon_box{panel.x + 36.0f, panel.y + 34.0f, 176.0f, 176.0f};
         const auto icon = icons_.find(game.title_id);
         if (icon != icons_.end() && icon->second.texture != 0)
@@ -748,7 +747,7 @@ void App::draw(Frame &frame)
         {
             const float cx = panel.x + 36.0f + 20.0f;
             const float cy = y - 7.0f;
-            list.circle(cx, cy, 21.0f, ui::accent().with_alpha(0.18f));
+            list.circle(cx, cy, 21.0f, color::field_open);
             switch (glyph)
             {
             case Glyph::tag: icon_tag(list, cx, cy, 24.0f, color::text2); break;
@@ -925,7 +924,7 @@ void App::draw_settings(Frame &frame)
                  color::text);
         if (on)
         {
-            over.gradient_rect_h(r, 18.0f, ui::accent().with_alpha(0.2f), ui::accent().with_alpha(0.0f));
+            over.gradient_rect_h(r, 18.0f, ui::accent().with_alpha(0.10f), ui::accent().with_alpha(0.0f));
             over.rounded_rect({r.x + 10.0f, r.y + 18.0f, 5.0f, r.h - 36.0f}, 2.5f, ui::accent());
         }
         float value_w = text_fit(over, type.regular, rows[i].value, r.x + r.w - 30.0f, r.cy() + 8.0f,
@@ -933,8 +932,9 @@ void App::draw_settings(Frame &frame)
         if (rows[i].kind == SettingsRow::Kind::theme)
         {
             const float sx = r.x + r.w - 30.0f - value_w - 30.0f;
-            over.glow({sx - 12.0f, r.cy() - 12.0f, 24.0f, 24.0f}, 12.0f, 10.0f, ui::accent().with_alpha(0.5f));
-            over.circle(sx, r.cy(), 12.0f, ui::accent());
+            const Color swatch = ui::skin_at(ui::skin_index(state_.theme)).swatch;
+            over.glow({sx - 12.0f, r.cy() - 12.0f, 24.0f, 24.0f}, 12.0f, 10.0f, swatch.with_alpha(0.5f));
+            over.circle(sx, r.cy(), 12.0f, swatch);
             if (on)
                 ui::text(over, type.regular, "<  >", sx - 40.0f, r.cy() + 8.0f, 22.0f, color::text3,
                          Align::right);
