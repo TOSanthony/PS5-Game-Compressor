@@ -409,11 +409,48 @@ out:
   return rc;
 }
 
+/* The fullscreen app (PPSA99290) replaces the web tile: when it is installed
+ * (ffpkg or folder) the old home-screen tile would only be a second icon.
+ * Creating /data/GameCompressor/force-home-tile keeps the tile anyway. */
+static int
+path_exists(const char *path) {
+  struct stat st;
+  return stat(path, &st) == 0;
+}
+
+static int
+fullscreen_app_present(void) {
+  static const char *const roots[] = {
+      "/data/homebrew", "/mnt/ext0/homebrew", "/mnt/ext1/homebrew",
+      "/mnt/usb0/homebrew", "/mnt/usb1/homebrew", "/mnt/usb2/homebrew",
+      "/mnt/usb3/homebrew", "/mnt/usb4/homebrew", "/mnt/usb5/homebrew",
+      "/mnt/usb6/homebrew", NULL};
+  char p[256];
+  for(int i = 0; roots[i]; i++) {
+    snprintf(p, sizeof(p), "%s/PPSA99290/eboot.bin", roots[i]);
+    if(path_exists(p)) return 1;
+    snprintf(p, sizeof(p), "%s/PPSA99290.ffpkg", roots[i]);
+    if(path_exists(p)) return 1;
+  }
+  return path_exists("/system_ex/app/PPSA99290/eboot.bin") ||
+         path_exists("/user/app/PPSA99290/eboot.bin");
+}
+
 static void *
 launcher_thread(void *arg) {
   (void)arg;
 
   gc_log("launcher started after web server");
+
+  if(fullscreen_app_present() && !path_exists(GC_DATA_DIR "/force-home-tile")) {
+    if(path_exists(GC_MARKER_PATH) || path_exists(GC_APP_ROOT "/" GAME_COMPRESSOR_LAUNCHER_TITLE_ID)) {
+      int rrc = gc_launcher_remove();
+      gc_log("launcher: fullscreen app present, old home tile removed rc=0x%08x", (unsigned)rrc);
+    } else {
+      gc_log("launcher: fullscreen app present, no home tile installed");
+    }
+    return NULL;
+  }
 
   pthread_mutex_lock(&g_launcher_install_lock);
   init_ps5_services();
