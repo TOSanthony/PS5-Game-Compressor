@@ -695,16 +695,42 @@ do_install(void) {
     if(have_zip && free_space_ok(DATA_DIR, 80LL << 20) &&
        download_verified(tag, ZIP_FILE, zip_hash, zip_part, MAX_ZIP) == 0) {
       set_phase("installing");
-      char folder_root[320];
-      snprintf(folder_root, sizeof(folder_root), "%s", app_dir);
-      zrc = extract_app_zip(zip_part, folder_root, zerr, sizeof(zerr));
+      /* Every copy of the app found (the mounted one may be on /data or on
+       * a USB drive): update them all so the one ShadowMount+ runs is hit. */
+      char updated[300] = "";
+      int copies = 0;
+      zrc = 0;
+      for(int i = 0; k_app_dirs[i] && zrc == 0; i++) {
+        char probe[400];
+        struct stat ps;
+        snprintf(probe, sizeof(probe), "%s/PPSA99290/eboot.bin", k_app_dirs[i]);
+        if(stat(probe, &ps) != 0) continue;
+        char root[320];
+        snprintf(root, sizeof(root), "%s", k_app_dirs[i]);
+        zrc = extract_app_zip(zip_part, root, zerr, sizeof(zerr));
+        if(zrc == 0) {
+          copies++;
+          size_t len = strlen(updated);
+          snprintf(updated + len, sizeof(updated) - len, "%s%s/PPSA99290", len ? ", " : "", k_app_dirs[i]);
+          gc_log("update: app folder updated: %s", root);
+        }
+      }
+      if(copies == 0 && zrc == 0) { zrc = -1; snprintf(zerr, sizeof(zerr), "no app folder found"); }
+      snprintf(app_dir, sizeof(app_dir), "%s", updated);
       unlink(zip_part);
     }
-    if(zrc != 0) gc_log("update: app folder not updated: %s", zerr);
+    if(zrc != 0) {
+      gc_log("update: app folder not updated: %s", zerr);
+      pthread_mutex_lock(&st.mutex);
+      snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-copy");
+      st.app_path[0] = 0;
+      pthread_mutex_unlock(&st.mutex);
+      fail(zerr); /* the payload is saved; tell why the interface was not */
+      return -1;
+    }
     pthread_mutex_lock(&st.mutex);
-    if(zrc != 0 && st.error[0]) st.error[0] = 0;
-    snprintf(st.app_status, sizeof(st.app_status), "%s", zrc == 0 ? "folder-updated" : "folder-copy");
-    st.app_path[0] = 0;
+    snprintf(st.app_status, sizeof(st.app_status), "%s", "folder-updated");
+    snprintf(st.app_path, sizeof(st.app_path), "%s", app_dir);
     pthread_mutex_unlock(&st.mutex);
   } else {
     char dest[400];

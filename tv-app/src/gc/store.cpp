@@ -351,6 +351,7 @@ bool Store::poll_update()
     info.current_version = doc.text("currentVersion");
     info.latest_version = doc.text("latestVersion");
     info.app_status = doc.text("appStatus");
+    info.app_path = doc.text("appPath");
     info.file = doc.text("file");
     info.current_build = static_cast<std::int64_t>(doc.number("currentBuild"));
     info.latest_build = static_cast<std::int64_t>(doc.number("latestBuild"));
@@ -601,6 +602,10 @@ void Store::update_logic(bool alive)
         std::string text;
         if (info.phase == "installed")
         {
+            if (info.app_status == "folder-updated" && !info.app_path.empty())
+                text = tr("Updated to build {build} in {path}. Close and reopen the app to use it.",
+                          {{"build", std::to_string(info.latest_build)}, {"path", info.app_path}});
+            else
             text = tr(info.app_status == "folder-copy"
                           ? "Updated to build {build}. The app folder copy was not changed: update it by hand."
                           : "Updated to build {build}. Close and reopen the app to use the new interface.",

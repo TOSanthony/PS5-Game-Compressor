@@ -152,6 +152,8 @@ constexpr Entry kTable[] = {
      "Mise à jour de Game Compressor vers le build {build}..."},
     {"Updated to build {build}. The app folder copy was not changed: update it by hand.",
      "Mise à jour vers le build {build}. La copie en dossier n'a pas été modifiée : mettez-la à jour à la main."},
+    {"Updated to build {build} in {path}. Close and reopen the app to use it.",
+     "Mise à jour vers le build {build} dans {path}. Fermez et rouvrez l'application."},
     {"Updated to build {build}. Close and reopen the app to use the new interface.",
      "Mise à jour vers le build {build}. Fermez et rouvrez l'application pour utiliser la nouvelle interface."},
     {"Restarted the payload with the version bundled in this app.",
