@@ -2,3 +2,4 @@ build/
 gen/
 game-compressor.elf
 .DS_Store
+tools/fullscreen-launcher/out/

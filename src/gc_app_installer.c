@@ -20,6 +20,14 @@
 #include "gc_diag.h"
 #include "gc_notify.h"
 
+#define GC_STR_(x) #x
+#define GC_STR(x) GC_STR_(x)
+#ifdef GAME_COMPRESSOR_PORT
+#define GC_UI_PORT_STR GC_STR(GAME_COMPRESSOR_PORT)
+#else
+#define GC_UI_PORT_STR "5910"
+#endif
+
 #define GC_APP_ROOT "/user/app"
 #define GC_APP_PARENT GC_APP_ROOT "/"
 #define GC_DATA_ROOT "/data"
@@ -30,6 +38,8 @@
 #define GC_APPINST_PATH "/system/common/lib/libSceAppInstUtil.sprx"
 #define GC_USER_SERVICE_MODULE "libSceUserService.sprx"
 #define GC_USER_SERVICE_PATH "/system/common/lib/libSceUserService.sprx"
+#define GC_SYSTEM_SERVICE_MODULE "libSceSystemService.sprx"
+#define GC_SYSTEM_SERVICE_PATH "/system/common/lib/libSceSystemService.sprx"
 #define GC_NETCTL_MODULE "libSceNetCtl.sprx"
 #define GC_NETCTL_PATH "/system/common/lib/libSceNetCtl.sprx"
 #define GC_NID_INSTALL_TITLE_DIR "Wudg3Xe3heE"
@@ -54,6 +64,7 @@ typedef int (*appinst_install_all_fn)(void *);
 typedef int (*appinst_uninstall_fn)(const char *);
 typedef int (*netctl_init_fn)(void);
 typedef int (*user_service_initialize_fn)(void *);
+typedef int (*launch_web_browser_fn)(const char *, void *);
 
 int sceKernelLoadStartModule(const char *, size_t, const void *, uint32_t,
                              void *, int *);
@@ -441,4 +452,27 @@ gc_launcher_start(void) {
     return -1;
   }
   return 0;
+}
+
+
+/* Experimental: open the web UI in the full system web browser app instead of
+ * the small web-view window used by the home-screen tile. Same call as the
+ * SDK's "browser" sample (sceSystemServiceLaunchWebBrowser). Returns 0 on
+ * success, a negative value if the symbol cannot be resolved, or the
+ * non-zero code returned by the system. */
+int
+gc_launcher_open_system_browser(const char *url) {
+  launch_web_browser_fn launch = NULL;
+  int rc = resolve_module_symbol(GC_SYSTEM_SERVICE_MODULE,
+                                 GC_SYSTEM_SERVICE_PATH,
+                                 "sceSystemServiceLaunchWebBrowser",
+                                 (void **)&launch);
+  if(rc != 0 || !launch) {
+    gc_log("open system browser: resolve failed rc=0x%08x", (unsigned)rc);
+    return -1;
+  }
+  rc = launch(url && url[0] ? url : "http://127.0.0.1:" 
+              GC_UI_PORT_STR "/", NULL);
+  gc_log("open system browser rc=0x%08x", (unsigned)rc);
+  return rc;
 }

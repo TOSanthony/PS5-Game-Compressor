@@ -262,6 +262,17 @@ dispatch_request(const http_request_t *req) {
     if(!strcmp(req->path, "/api/control/shutdown")) {
       return shutdown_request(req);
     }
+    if(!strcmp(req->path, "/api/control/open-browser")) {
+      int brc = gc_launcher_open_system_browser(NULL);
+      char bbody[96];
+      int bn = snprintf(bbody, sizeof(bbody), "{\"ok\":%s,\"rc\":%d}",
+                        brc == 0 ? "true" : "false", brc);
+      if(bn < 0 || (size_t)bn >= sizeof(bbody)) {
+        return websrv_send_error_json(req->fd, 500, "response too large");
+      }
+      return websrv_send(req->fd, brc == 0 ? 200 : 502, "application/json",
+                         bbody, (size_t)bn);
+    }
     if(!strcmp(req->path, "/api/control/handoff-state")) {
       return gc_api_handoff_state_request(req);
     }

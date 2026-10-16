@@ -5,5 +5,6 @@
 
 int gc_launcher_start(void);
 int gc_launcher_remove(void);
+int gc_launcher_open_system_browser(const char *url);
 
 #endif
