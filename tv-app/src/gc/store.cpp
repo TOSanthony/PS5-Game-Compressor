@@ -366,8 +366,8 @@ bool Store::poll_update()
 
 namespace
 {
-constexpr const char *kSettingsDir = "/data/game-compressor";
-constexpr const char *kSettingsFile = "/data/game-compressor/tv-app.conf";
+constexpr const char *kSettingsDir = "/data/GameCompressor";
+constexpr const char *kSettingsFile = "/data/GameCompressor/tv-app.conf";
 } // namespace
 
 void Store::load_settings()

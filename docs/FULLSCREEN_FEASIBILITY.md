@@ -101,7 +101,7 @@ The payload checks the project's GitHub releases (`/api/gc/update`, implemented 
 release carries `build-info.json` (`{"build": <CI run number>, ...}`) and `SHA256SUMS`.
 When a newer build exists it downloads `game-compressor.elf` and `PPSA99290.ffpkg`,
 verifies both against `SHA256SUMS` (plus ELF header / UFS2 magic), saves the ELF to
-`/data/game-compressor/` and replaces the installed `PPSA99290.ffpkg` atomically
+`/data/GameCompressor/` and replaces the installed `PPSA99290.ffpkg` atomically
 (a folder copy is never touched). The TV app then restarts the payload from the new
 ELF (the payload's existing hand-off takes over the port); the new app image is used
 the next time the app is opened. The TV app's Settings screen shows the state and can

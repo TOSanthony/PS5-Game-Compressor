@@ -37,7 +37,7 @@
 #define API_BASE "https://api.github.com/repos/" REPO "/"
 #define APP_FILE "PPSA99290.ffpkg"
 #define ELF_FILE "game-compressor.elf"
-#define DATA_DIR "/data/game-compressor"
+#define DATA_DIR "/data/GameCompressor" /* the payload's own, known-writable directory */
 #define MAX_ELF (64LL << 20)
 #define MAX_IMAGE (512LL << 20)
 #define SPARE (64LL << 20)
@@ -65,6 +65,7 @@ static struct {
   char app_path[420];
   int elf_saved;
   int curl_ready;
+  int staged_elsewhere;
 } st = {.mutex = PTHREAD_MUTEX_INITIALIZER, .phase = "idle"};
 
 static void
@@ -323,7 +324,12 @@ download_verified(const char *tag, const char *name, const char *expected,
   pthread_mutex_unlock(&st.mutex);
   set_phase("downloading");
   int fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-  if(fd < 0) { fail("cannot write the download"); return -1; }
+  if(fd < 0) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "cannot write %s: %s", part, strerror(errno));
+    fail(msg);
+    return -1;
+  }
   sink_t sink = {.fd = fd, .limit = limit, .digest = EVP_MD_CTX_new()};
   if(!sink.digest || EVP_DigestInit_ex(sink.digest, EVP_sha256(), NULL) != 1) {
     close(fd); unlink(part); fail("sha256 init failed"); return -1;
@@ -382,6 +388,36 @@ find_app_dir(char *dir, size_t size, int *folder_copy, int *existing) {
   }
 }
 
+/* Copies src over dest (through a temporary name next to dest) when rename()
+ * cannot cross file systems. Returns 1 on success. */
+static int
+copy_over(const char *src, const char *dest) {
+  char tmp[460];
+  snprintf(tmp, sizeof(tmp), "%s.new", dest);
+  int in = open(src, O_RDONLY);
+  int out = in >= 0 ? open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644) : -1;
+  int ok = 0;
+  if(in >= 0 && out >= 0) {
+    static char buf[1 << 16];
+    ssize_t n;
+    ok = 1;
+    while(ok && (n = read(in, buf, sizeof(buf))) > 0) {
+      for(ssize_t done = 0; done < n;) {
+        ssize_t w = write(out, buf + done, (size_t)(n - done));
+        if(w <= 0) { ok = 0; break; }
+        done += w;
+      }
+    }
+    if(n < 0) ok = 0;
+    if(ok) fsync(out);
+  }
+  if(in >= 0) close(in);
+  if(out >= 0) close(out);
+  if(ok && rename(tmp, dest) == 0) return 1;
+  unlink(tmp);
+  return 0;
+}
+
 static int
 do_install(void) {
   if(do_check() != 0) return -1;
@@ -410,7 +446,12 @@ do_install(void) {
   char app_dir[300];
   int folder_copy, existing;
   find_app_dir(app_dir, sizeof(app_dir), &folder_copy, &existing);
-  mkdir(DATA_DIR, 0755);
+  if(mkdir(DATA_DIR, 0755) != 0 && errno != EEXIST) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "cannot create %s: %s", DATA_DIR, strerror(errno));
+    fail(msg);
+    return -1;
+  }
   if(!free_space_ok(DATA_DIR, 80LL << 20) ||
      (!folder_copy && !free_space_ok(app_dir, 200LL << 20))) {
     fail("not enough free space for the update");
@@ -429,6 +470,23 @@ do_install(void) {
     return -1;
   }
   if(!folder_copy) {
+    /* Prefer a hidden file next to the destination (atomic rename). If that
+     * directory refuses new files, stage in our own directory and copy. */
+    int staged_elsewhere = 0;
+    {
+      int probe = open(app_part, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      if(probe >= 0) {
+        close(probe);
+        unlink(app_part);
+      } else {
+        gc_log("update: cannot stage in %s: %s", app_dir, strerror(errno));
+        snprintf(app_part, sizeof(app_part), "%s/" APP_FILE ".part", DATA_DIR);
+        staged_elsewhere = 1;
+      }
+    }
+    pthread_mutex_lock(&st.mutex);
+    st.staged_elsewhere = staged_elsewhere;
+    pthread_mutex_unlock(&st.mutex);
     if(download_verified(tag, APP_FILE, app_hash, app_part, MAX_IMAGE) != 0) {
       unlink(elf_part);
       return -1;
@@ -473,9 +531,15 @@ do_install(void) {
     char dest[400];
     snprintf(dest, sizeof(dest), "%s/" APP_FILE, app_dir);
     if(rename(app_part, dest) != 0) {
+      int saved_errno = errno;
+      if(!copy_over(app_part, dest)) {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "cannot replace %s: %s", dest, strerror(saved_errno));
+        unlink(app_part);
+        fail(msg);
+        return -1;
+      }
       unlink(app_part);
-      fail("cannot replace the app image");
-      return -1;
     }
     pthread_mutex_lock(&st.mutex);
     snprintf(st.app_status, sizeof(st.app_status), "%s", existing ? "replaced" : "created");

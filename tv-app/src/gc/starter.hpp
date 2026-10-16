@@ -24,8 +24,8 @@ int compare_versions(std::string_view a, std::string_view b);
 
 struct Locations
 {
-    std::string saved_elf = "/data/game-compressor/game-compressor.elf";
-    std::string saved_version = "/data/game-compressor/saved-version.txt";
+    std::string saved_elf = "/data/GameCompressor/game-compressor.elf";
+    std::string saved_version = "/data/GameCompressor/saved-version.txt";
     std::string bundled_elf = "/app0/gc/game-compressor.elf";
     std::string bundled_version = "/app0/gc/version.txt";
 };
