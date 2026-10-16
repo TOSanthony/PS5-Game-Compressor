@@ -908,7 +908,7 @@ void App::draw_settings(Frame &frame)
     using namespace ui;
     const Type &type = context_.type;
     DrawList &over = frame.overlay;
-    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.72f));
+    over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x050507, 0.97f));
     ui::text(over, type.light, tr("Settings"), kGutter, 118.0f, 64.0f, color::text);
     const std::vector<SettingsRow> rows = settings_rows();
     const float x = 360.0f;
