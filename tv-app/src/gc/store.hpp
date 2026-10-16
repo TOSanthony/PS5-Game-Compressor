@@ -35,6 +35,17 @@ struct Game
     bool size_pending = false;   // folder size not measured yet
     bool size_estimated = false; // cached value, may be stale
     std::string size_status;
+    bool ampr_present = false;
+    bool is_mounted = false;
+    bool can_move_to_usb = false;
+    bool can_move_to_internal = false;
+};
+
+struct Target
+{
+    std::string id;
+    std::string name;
+    std::int64_t free_bytes = 0;
 };
 
 struct Job
@@ -71,6 +82,7 @@ struct Snapshot
     Link link = Link::starting;
     bool games_loaded = false;
     std::vector<Game> games;
+    std::vector<Target> targets; // USB / extended storage
     Job job;
     std::string message; // last action result or start problem
     std::uint64_t version = 0; // bumps whenever the snapshot changes
@@ -84,6 +96,7 @@ enum class Verb : std::uint8_t
     cancel,
     refresh,
     measure, // asks the payload to measure a folder's size now
+    action,  // any POST /api/gc/<path> on a game
 };
 
 class Store
@@ -97,6 +110,9 @@ class Store
     Snapshot snapshot();
     // Queues an action; game may be null for cancel / refresh.
     void request(Verb verb, const Game *game);
+    // Queues POST /api/gc/<path>?titleId&sourcePath[&extra] with a label for the message.
+    void act(const std::string &path, const std::string &label, const Game &game,
+             const std::string &extra = {});
 
   private:
     struct Command
@@ -105,11 +121,15 @@ class Store
         std::string title_id;
         std::string source_path;
         std::string name;
+        std::string path;  // Verb::action
+        std::string label; // Verb::action
+        std::string extra; // Verb::action, e.g. "&usbId=usb0"
     };
 
     void run();
     bool poll_job();
     bool poll_games();
+    void poll_targets();
     void run_command(const Command &command);
     void set_message(const std::string &text);
 

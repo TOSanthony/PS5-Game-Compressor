@@ -66,13 +66,24 @@ Snapshot Store::snapshot()
 
 void Store::request(Verb verb, const Game *game)
 {
-    Command command{verb, {}, {}, {}};
+    Command command{verb, {}, {}, {}, {}, {}, {}};
     if (game)
     {
         command.title_id = game->title_id;
         command.source_path = game->source_path;
         command.name = game->name;
     }
+    {
+        Lock lock(mutex_);
+        commands_.push_back(std::move(command));
+    }
+    wake_.notify();
+}
+
+void Store::act(const std::string &path, const std::string &label, const Game &game,
+                const std::string &extra)
+{
+    Command command{Verb::action, game.title_id, game.source_path, game.name, path, label, extra};
     {
         Lock lock(mutex_);
         commands_.push_back(std::move(command));
@@ -142,6 +153,10 @@ bool Store::poll_games()
         game.size_pending = item.flag("sizePending");
         game.size_estimated = item.flag("sizeEstimated");
         game.size_status = item.text("sizeStatus");
+        game.ampr_present = item.flag("amprPresent");
+        game.is_mounted = item.flag("isMounted");
+        game.can_move_to_usb = item.flag("canMoveToUsb");
+        game.can_move_to_internal = item.flag("canMoveToInternal");
         if (game.name.empty())
             game.name = game.title_id;
         if (!game.title_id.empty())
@@ -152,6 +167,29 @@ bool Store::poll_games()
     state_.games_loaded = true;
     ++state_.version;
     return true;
+}
+
+void Store::poll_targets()
+{
+    http::Request request;
+    request.path = "/api/gc/usb";
+    const http::Response reply = transport_.send(request);
+    json::Value doc;
+    if (!reply.transported() || reply.status != 200 || !json::parse(reply.body, &doc))
+        return;
+    std::vector<Target> targets;
+    for (const json::Value &item : doc["usb"].items())
+    {
+        Target target;
+        target.id = item.text("id");
+        target.name = item.text("name");
+        target.free_bytes = static_cast<std::int64_t>(item.number("freeBytes"));
+        if (!target.id.empty())
+            targets.push_back(std::move(target));
+    }
+    Lock lock(mutex_);
+    state_.targets = std::move(targets);
+    ++state_.version;
 }
 
 void Store::run_command(const Command &command)
@@ -169,6 +207,10 @@ void Store::run_command(const Command &command)
         transport_.send(request);
         poll_games();
         return;
+    case Verb::action:
+        request.path = command.path;
+        label = command.label;
+        break;
     case Verb::cancel:
         request.path = "/api/gc/job/cancel";
         label = "Cancel";
@@ -188,7 +230,7 @@ void Store::run_command(const Command &command)
     }
     if (command.verb != Verb::cancel)
         request.path += "?titleId=" + encode(command.title_id) +
-                        "&sourcePath=" + encode(command.source_path);
+                        "&sourcePath=" + encode(command.source_path) + command.extra;
     const http::Response reply = transport_.send(request);
     json::Value doc;
     std::string detail;
@@ -236,7 +278,10 @@ void Store::run()
             if (!state_.games_loaded || now - last_games > (sizing ? 2.0 : busy ? 15.0 : 5.0))
             {
                 if (poll_games())
+                {
                     last_games = now;
+                    poll_targets();
+                }
             }
         }
         else if (++misses >= 2 && now - last_start > 30.0)

@@ -81,19 +81,60 @@ std::string kind_text(const Game &game)
 
 } // namespace
 
-int App::choices(const Game &game, Choice out[3]) const
+std::vector<App::Item> App::main_menu(const Game &game) const
 {
-    int n = 0;
-    if (game.source_kind == "compressed")
+    std::vector<Item> items;
+    const auto add = [&](const char *label, const char *path, bool danger = false,
+                         Item::Next next = Item::Next::run, std::string extra = {})
+    { items.push_back({label, path, std::move(extra), danger, next}); };
+    if (game.source_kind == "folder")
     {
-        out[n++] = {"Validate", Verb::validate};
-        out[n++] = {"Validate and repair", Verb::repair};
+        add("Compress", "/api/gc/compress");
+        add("Make image (exFAT)", "/api/gc/make-image");
     }
-    else if (game.source_kind == "folder" || game.source_kind == "image")
+    else if (game.source_kind == "compressed")
     {
-        out[n++] = {"Compress", Verb::compress};
+        add("Validate and repair", "/api/gc/validate-repair");
+        add("Validate only", "/api/gc/validate-only");
+        add("Uncompress", "/api/gc/uncompress");
     }
-    return n;
+    else if (game.source_kind == "image")
+    {
+        add("Compress", "/api/gc/compress");
+        add("Set read-only", "/api/gc/set-read-only");
+        if (game.is_mounted)
+            add("Extract to folder", "/api/gc/extract-image");
+    }
+    else
+        return items;
+    if (game.ampr_present)
+        add("Build AMPR index", "/api/gc/build-ampr-index");
+    if (game.can_move_to_usb || game.can_move_to_internal)
+    {
+        add("Copy to...", "", false, Item::Next::copy);
+        add("Move to...", "", false, Item::Next::move);
+    }
+    add("Delete game data", "", true, Item::Next::confirm_delete);
+    return items;
+}
+
+std::vector<App::Item> App::target_menu(const Game &game, bool copy) const
+{
+    std::vector<Item> items;
+    if (game.can_move_to_internal)
+        items.push_back({"Internal storage",
+                         copy ? "/api/gc/copy-to-internal" : "/api/gc/move-to-internal",
+                         {}, false, Item::Next::run});
+    if (game.can_move_to_usb)
+    {
+        for (const Target &target : state_.targets)
+            items.push_back({(target.name.empty() ? target.id : target.name) + "  (" +
+                                 size_text(target.free_bytes) + " free)",
+                             copy ? "/api/gc/copy-to-usb" : "/api/gc/move-to-usb",
+                             "&usbId=" + target.id, false, Item::Next::run});
+    }
+    items.push_back({"Back", "", {}, false, Item::Next::close});
+    return items;
 }
 
 void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feedback)
@@ -120,11 +161,24 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
 
     if (mode_ == Mode::menu)
     {
-        Choice options[3];
-        const int n = count ? choices(state_.games[static_cast<std::size_t>(selected_)], options) : 0;
-        if (n == 0 || input.is_pressed(Action::back))
+        const int n = static_cast<int>(menu_.size());
+        if (count == 0 || n == 0)
         {
             mode_ = Mode::list;
+            return;
+        }
+        const Game &game = state_.games[static_cast<std::size_t>(selected_)];
+        if (input.is_pressed(Action::back))
+        {
+            if (submenu_)
+            {
+                menu_ = main_menu(game);
+                menu_title_ = game.name;
+                submenu_ = false;
+                menu_index_ = 0;
+            }
+            else
+                mode_ = Mode::list;
             return;
         }
         if (input.nav == Direction::up && menu_index_ > 0)
@@ -133,17 +187,43 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
             ++menu_index_;
         if (input.is_pressed(Action::confirm))
         {
-            if (state_.job.busy)
+            const Item item = menu_[static_cast<std::size_t>(std::min(menu_index_, n - 1))];
+            switch (item.next)
             {
-                notice_ = "Another job is running. Wait or cancel it with Square.";
-                notice_left_ = 5.0f;
+            case Item::Next::copy:
+            case Item::Next::move:
+                menu_ = target_menu(game, item.next == Item::Next::copy);
+                menu_title_ = item.next == Item::Next::copy ? "Copy to" : "Move to";
+                submenu_ = true;
+                menu_index_ = 0;
+                break;
+            case Item::Next::confirm_delete:
+                menu_ = {{"Keep the game", "", {}, false, Item::Next::close},
+                         {"Yes, delete game data", "/api/gc/delete-game-data", {}, true,
+                          Item::Next::run}};
+                menu_title_ = "Delete " + game.name + "?";
+                submenu_ = true;
+                menu_index_ = 0;
+                break;
+            case Item::Next::close:
+                menu_ = main_menu(game);
+                menu_title_ = game.name;
+                submenu_ = false;
+                menu_index_ = 0;
+                break;
+            case Item::Next::run:
+                if (state_.job.busy)
+                {
+                    notice_ = "Another job is running. Wait or cancel it with Square.";
+                    notice_left_ = 5.0f;
+                }
+                else
+                {
+                    context_.store.act(item.path, item.label, game, item.extra);
+                }
+                mode_ = Mode::list;
+                break;
             }
-            else
-            {
-                context_.store.request(options[std::min(menu_index_, n - 1)].verb,
-                                       &state_.games[static_cast<std::size_t>(selected_)]);
-            }
-            mode_ = Mode::list;
         }
         return;
     }
@@ -158,9 +238,12 @@ void App::update(const hui::InputFrame &input, float dt, hui::ui::Feedback &feed
         selected_ = std::max(0, std::min(count - 1, selected_ + 8));
     if (input.is_pressed(Action::confirm) && count > 0)
     {
-        Choice options[3];
-        if (choices(state_.games[static_cast<std::size_t>(selected_)], options) > 0)
+        const Game &game = state_.games[static_cast<std::size_t>(selected_)];
+        menu_ = main_menu(game);
+        if (!menu_.empty())
         {
+            menu_title_ = game.name;
+            submenu_ = false;
             mode_ = Mode::menu;
             menu_index_ = 0;
         }
@@ -333,20 +416,21 @@ void App::draw(Frame &frame)
     {
         DrawList &over = frame.overlay;
         over.rounded_rect({0.0f, 0.0f, 1920.0f, 1080.0f}, 0.0f, Color::rgb(0x000000, 0.6f));
-        const Rect box{660.0f, 340.0f, 600.0f, 400.0f};
+        const int n = static_cast<int>(menu_.size());
+        const float height = 150.0f + static_cast<float>(n) * 70.0f;
+        const Rect box{610.0f, std::max(40.0f, (1080.0f - height) * 0.5f), 700.0f, height};
         modal(over, box);
-        const Game &game = state_.games[static_cast<std::size_t>(selected_)];
-        text_fit(over, type.semibold, game.name, box.cx(), box.y + 70.0f, 30.0f, box.w - 60.0f,
+        text_fit(over, type.semibold, menu_title_, box.cx(), box.y + 70.0f, 30.0f, box.w - 60.0f,
                  color::text, Align::center);
-        Choice options[3];
-        const int n = choices(game, options);
         for (int i = 0; i < n; ++i)
         {
-            const Rect r{box.x + 80.0f, box.y + 130.0f + static_cast<float>(i) * 80.0f,
-                         box.w - 160.0f, kButtonHeight};
-            button(over, type, r, options[i].label,
-                   i == menu_index_ ? ButtonKind::primary : ButtonKind::secondary,
-                   i == menu_index_ ? 1.0f : 0.0f, true, 22.0f);
+            const Item &item = menu_[static_cast<std::size_t>(i)];
+            const Rect r{box.x + 60.0f, box.y + 110.0f + static_cast<float>(i) * 70.0f,
+                         box.w - 120.0f, kButtonHeight};
+            const ButtonKind kind = i == menu_index_
+                                        ? (item.danger ? ButtonKind::danger : ButtonKind::primary)
+                                        : ButtonKind::secondary;
+            button(over, type, r, item.label, kind, i == menu_index_ ? 1.0f : 0.0f, true, 22.0f);
         }
     }
 

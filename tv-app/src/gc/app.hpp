@@ -12,6 +12,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace gc
 {
@@ -57,19 +58,34 @@ class App
         menu, // action menu for the selected game
     };
 
-    struct Choice
+    struct Item
     {
-        const char *label;
-        Verb verb;
+        enum class Next : std::uint8_t
+        {
+            run,
+            copy,
+            move,
+            confirm_delete,
+            close,
+        };
+        std::string label;
+        std::string path;  // POST /api/gc/<path>
+        std::string extra; // extra query, e.g. "&usbId=usb0"
+        bool danger = false;
+        Next next = Next::run;
     };
 
-    int choices(const Game &game, Choice out[3]) const;
+    std::vector<Item> main_menu(const Game &game) const;
+    std::vector<Item> target_menu(const Game &game, bool copy) const;
 
     Context &context_;
     Snapshot state_;
     Mode mode_ = Mode::list;
     int selected_ = 0;
     int menu_index_ = 0;
+    std::vector<Item> menu_;
+    std::string menu_title_;
+    bool submenu_ = false;
     float scroll_ = 0.0f;
     float clock_ = 0.0f;
     std::string notice_;
